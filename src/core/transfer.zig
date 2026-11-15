@@ -108,6 +108,35 @@ pub fn release_of(io: std.Io, arena: std.mem.Allocator, site: credentials.Site) 
     return health.version;
 }
 
+/// Where `site` is synced: the address its Publr names in `/api/health` (`sync`: a host that
+/// keeps sync away from the CDN in front of its pages, as Publr Cloud does), with the same
+/// sign-in; the site itself when it names none or cannot be asked.
+pub fn sync_of(io: std.Io, arena: std.mem.Allocator, site: credentials.Site) credentials.Site {
+    const answer = get(io, arena, site, health_route) catch return site;
+
+    if (answer.status != .ok) {
+        return site;
+    }
+
+    const Health = struct {
+        sync: []const u8 = "",
+    };
+    const health = std.json.parseFromSliceLeaky(Health, arena, answer.body, .{
+        .ignore_unknown_fields = true,
+        .allocate = .alloc_always,
+    }) catch return site;
+
+    if (health.sync.len == 0 or std.mem.indexOf(u8, health.sync, "://") == null) {
+        return site;
+    }
+
+    var synced = site;
+
+    synced.address = std.mem.trimEnd(u8, health.sync, "/");
+
+    return synced;
+}
+
 /// What a clone of `site` would bring down, as the site says it (JSON); null, having said
 /// why, when it does not.
 pub fn size_text(io: std.Io, arena: std.mem.Allocator, site: credentials.Site) !?[]const u8 {

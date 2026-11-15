@@ -54,6 +54,9 @@ pub const Linked = struct {
     publr: []const u8,
     link: links.Clone,
     site: credentials.Site,
+    /// The same site where it is synced (`transfer.sync_of`): packs, pieces and pushes go
+    /// there; every address shown to a person stays the site's own.
+    sync: credentials.Site,
 };
 
 /// The site around this folder and what it is linked to; null, having said why (with the
@@ -87,6 +90,7 @@ pub fn linked_here(init: std.process.Init, config: *const Config, code: *u8) !?L
         .publr = publr,
         .link = link,
         .site = site,
+        .sync = transfer.sync_of(config.io, config.arena, site),
     };
 }
 
@@ -244,7 +248,7 @@ fn serving_here(config: *const Config, folder: []const u8) bool {
 
 /// Where the folder is against the site; null, having said why, when the site cannot say.
 fn where_of(config: *const Config, linked: Linked) !?Where {
-    const size = try transfer.size_of(config.io, config.arena, linked.site) orelse return null;
+    const size = try transfer.size_of(config.io, config.arena, linked.sync) orelse return null;
     const own = try core.changes.mark(config, linked.publr, linked.folder, linked.link.since);
     const unsent = own.len > 0 and !std.mem.eql(u8, own, linked.link.pushed);
     const pushed = own.len > 0 and !unsent;
@@ -358,14 +362,14 @@ fn bring_down(config: *const Config, linked: Linked, out: *std.Io.Writer) !?Brou
     const asked = try std.json.Stringify.valueAlloc(arena, .{
         .have = try held(config, linked),
     }, .{});
-    const made = try transfer.prepared(config.io, arena, linked.site, asked, out, .{}) orelse return null;
+    const made = try transfer.prepared(config.io, arena, linked.sync, asked, out, .{}) orelse return null;
     const download = try std.fs.path.join(arena, &.{ linked.folder, download_name });
 
     defer cwd.deleteFile(config.io, download) catch |err| {
         std.log.debug("removing {s}: {t}", .{ download, err });
     };
 
-    try transfer.fetch(config.io, linked.site, made.bytes, download, out, .{});
+    try transfer.fetch(config.io, linked.sync, made.bytes, download, out, .{});
 
     const exported = try site_data.scratch_beside(config, linked.folder, "pulled");
     defer cwd.deleteTree(config.io, exported) catch |err| {

@@ -91,9 +91,11 @@ pub fn run(
         return 2;
     };
     const site = try signed_in(init, config, out, asked.given) orelse return 1;
+    // Packs and pieces come from where the site is synced, past any CDN in front of it.
+    const syncing = transfer.sync_of(config.io, config.arena, site);
 
     if (asked.size_only) {
-        const text = try transfer.size_text(config.io, config.arena, site) orelse return 1;
+        const text = try transfer.size_text(config.io, config.arena, syncing) orelse return 1;
 
         try out.print("{s}\n", .{text});
         return 0;
@@ -117,7 +119,7 @@ pub fn run(
     if (std.fs.path.dirname(folder)) |parent| try std.Io.Dir.cwd().createDirPath(config.io, parent);
 
     // Weighed before the page is drawn: its choice and its bar's parts come from this.
-    const size = try transfer.size_of(config.io, config.arena, site) orelse transfer.Size{};
+    const size = try transfer.size_of(config.io, config.arena, syncing) orelse transfer.Size{};
     const port = asked.port orelse try (try core.Sites.find(config)).free_port(&core.server.listening);
     // Asked on the page what comes down, unless the command said (`--media`).
     const asking = !asked.media_given;
@@ -152,7 +154,7 @@ pub fn run(
         media = try arriving.wait_for_choice();
     }
 
-    const latest = bring_down(config, out, site, publr, folder, media, &arriving) catch |err| {
+    const latest = bring_down(config, out, syncing, publr, folder, media, &arriving) catch |err| {
         const why = stopped_because(err);
 
         std.debug.print("publr clone: {s}\n", .{why});

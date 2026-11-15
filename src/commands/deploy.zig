@@ -432,11 +432,36 @@ const Client = struct {
         return null;
     }
 
-    /// The archive sent to the dashboard as it is read; the upload's name there.
+    /// Where the dashboard takes uploads: its sync address (`cloud.sync`), straight to its
+    /// server past the CDN in front of it; the dashboard itself when it names none.
+    fn sync_address(client: Client) []const u8 {
+        const reply = client.call("cloud.sync", "{}") catch return client.dashboard;
+
+        if (reply.status != .ok) {
+            return client.dashboard;
+        }
+
+        const Synced = struct {
+            sync: []const u8 = "",
+        };
+        const synced = std.json.parseFromSliceLeaky(Synced, client.config.arena, reply.body, .{
+            .ignore_unknown_fields = true,
+            .allocate = .alloc_always,
+        }) catch return client.dashboard;
+
+        if (synced.sync.len == 0 or std.mem.indexOf(u8, synced.sync, "://") == null) {
+            return client.dashboard;
+        }
+
+        return std.mem.trimEnd(u8, synced.sync, "/");
+    }
+
+    /// The archive sent to the dashboard as it is read, to its sync address; the upload's
+    /// name there.
     fn upload(client: Client, out: *std.Io.Writer, path: []const u8) !?[]const u8 {
         const arena = client.config.arena;
         const reply = try transfer.send_in_parts(client.config.io, arena, .{
-            .url = try std.fmt.allocPrint(arena, "{s}{s}", .{ client.dashboard, upload_path }),
+            .url = try std.fmt.allocPrint(arena, "{s}{s}", .{ client.sync_address(), upload_path }),
             .token = client.token,
             .path = path,
             .piece_bytes = upload_piece_bytes,

@@ -143,7 +143,7 @@ fn send_part(
     const arena = config.arena;
     const reply = try transfer.send(config.io, arena, .{
         .url = try std.fmt.allocPrint(arena, "{s}{s}?name={s}&part={s}", .{
-            linked.site.address,
+            linked.sync.address,
             push_route,
             linked.link.branch,
             part,
