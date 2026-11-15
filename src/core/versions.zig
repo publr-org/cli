@@ -117,6 +117,18 @@ pub fn chosen_binary(config: *const Config, site: Site) ?[]const u8 {
     return null;
 }
 
+/// The Publr chosen for this call or for every site, ahead of any release, or null: for a
+/// folder that is no site yet (a clone, an archive).
+pub fn chosen_for_all(config: *const Config) ?[]const u8 {
+    for ([_][]const u8{ config.call_publr, config.publr }) |chosen| {
+        if (chosen.len > 0) {
+            return chosen;
+        }
+    }
+
+    return null;
+}
+
 /// What `--publr` or `config publr` names, as a binary: a path as given (made absolute), or
 /// a release, fetched when not kept.
 pub fn resolve(config: *const Config, given: []const u8) ![]const u8 {

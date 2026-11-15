@@ -373,7 +373,7 @@ fn bring_down(config: *const Config, linked: Linked, out: *std.Io.Writer) !?Brou
     };
 
     const manifest = try archive.read(config.io, arena, download, exported);
-    const publr = try versions.kept(config, made.publr);
+    const publr = versions.chosen_for_all(config) orelse try versions.kept(config, made.publr);
 
     try apply(config, publr, linked.folder, exported);
 

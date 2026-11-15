@@ -94,7 +94,7 @@ pub fn run(
     }
 
     const release = try transfer.release_of(config.io, config.arena, site) orelse return 1;
-    const publr = try versions.kept(config, release);
+    const publr = versions.chosen_for_all(config) orelse try versions.kept(config, release);
     const by_slug = std.mem.indexOfAny(u8, asked.given, ".:/") == null;
     const name = if (by_slug) asked.given else name_of(site.address);
     const folder = if (asked.folder) |given|
@@ -106,6 +106,9 @@ pub fn run(
         std.debug.print("publr clone: {s} is there already\n", .{folder});
         return 1;
     } else |_| {}
+
+    // The folder it goes in, made on a computer with no projects yet.
+    if (std.fs.path.dirname(folder)) |parent| try std.Io.Dir.cwd().createDirPath(config.io, parent);
 
     const media = if (asked.media_given) asked.media else try ask_media(init, config, site);
 
