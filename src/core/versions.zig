@@ -1,0 +1,505 @@
+//! Which Publr a site runs. A site pins a release in its `publr.zon` (`.publr = "0.6.4"`);
+//! the command keeps each release it needs in `versions/<v>/publr`, fetched from where Publr
+//! publishes them and checked against the signature Publr's own updates trust. A `publr`
+//! inside the site's folder overrides the pin: the workspace build, linked in while Publr
+//! itself is worked on.
+
+const std = @import("std");
+const builtin = @import("builtin");
+const config_module = @import("config.zig");
+const sites_module = @import("sites.zig");
+
+const Config = config_module.Config;
+const Site = sites_module.Site;
+
+pub const folder_name = "versions";
+pub const workspace_name = "workspace";
+pub const binary_name = "publr";
+/// The public half of the key Publr's Release workflow signs `SHA256SUMS` with; the same one
+/// Publr's updates check (`publr/src/model/release.zig`).
+pub const signing_key_hex = "72928f861218c31c9358d8be4d51294e4fe923a2970d784740f436e28a7567e8";
+pub const repository = "publr-org/publr";
+pub const kept_max: u32 = 256;
+const downloads_default = "https://github.com/" ++ repository ++ "/releases/download";
+const latest_default = "https://api.github.com/repos/" ++ repository ++ "/releases/latest";
+const sums_name = "SHA256SUMS";
+const signature_name = "SHA256SUMS.sig";
+const project_bytes_max: u32 = 1 << 20;
+const binary_bytes_max: u32 = 512 << 20;
+const empty_folder = ".zig-cache/publr-cli-empty";
+const build_attempts: u32 = 3;
+
+/// This machine's file in a release: `publr-macos-aarch64`, `publr-linux-x86_64`.
+pub fn asset_name() []const u8 {
+    const os = switch (builtin.os.tag) {
+        .macos => "macos",
+        .linux => "linux",
+        else => "unsupported",
+    };
+    const arch = switch (builtin.cpu.arch) {
+        .aarch64 => "aarch64",
+        .x86_64 => "x86_64",
+        else => "unsupported",
+    };
+
+    return "publr-" ++ os ++ "-" ++ arch;
+}
+
+/// The release `folder`'s `publr.zon` pins, or null.
+pub fn pin_of(config: *const Config, folder: []const u8) !?[]const u8 {
+    const text = try read_project(config, folder);
+    const Project = struct {
+        publr: ?[]const u8 = null,
+    };
+    const project = std.zon.parse.fromSliceAlloc(Project, config.arena, text, null, .{
+        .ignore_unknown_fields = true,
+    }) catch return error.BadProjectFile;
+
+    return project.publr;
+}
+
+/// `folder`'s `publr.zon` pinned to `version`, the rest of the file as it was.
+pub fn set_pin(config: *const Config, folder: []const u8, version: []const u8) !void {
+    std.debug.assert(version.len > 0);
+
+    const text = try read_project(config, folder);
+    const changed = try with_pin(config.arena, text, version);
+
+    try std.Io.Dir.cwd().writeFile(config.io, .{
+        .sub_path = try std.fs.path.join(config.arena, &.{ folder, sites_module.project_file }),
+        .data = changed,
+    });
+}
+
+/// `text` (a `publr.zon`) with `.publr` set to `version`: the value replaced, or the field
+/// added first.
+pub fn with_pin(arena: std.mem.Allocator, text: []const u8, version: []const u8) ![]const u8 {
+    std.debug.assert(version.len > 0);
+
+    const field = ".publr = \"";
+
+    if (std.mem.indexOf(u8, text, field)) |at| {
+        const value_at = at + field.len;
+        const end = std.mem.indexOfScalarPos(u8, text, value_at, '"') orelse return error.BadProjectFile;
+
+        return std.mem.concat(arena, u8, &.{ text[0..value_at], version, text[end..] });
+    }
+
+    const open = std.mem.indexOf(u8, text, ".{") orelse return error.BadProjectFile;
+    const after = open + 2;
+
+    return std.fmt.allocPrint(arena, "{s}\n    .publr = \"{s}\",{s}", .{
+        text[0..after],
+        version,
+        text[after..],
+    });
+}
+
+fn read_project(config: *const Config, folder: []const u8) ![:0]const u8 {
+    const path = try std.fs.path.join(config.arena, &.{ folder, sites_module.project_file });
+
+    return std.Io.Dir.cwd().readFileAllocOptions(
+        config.io,
+        path,
+        config.arena,
+        .limited(project_bytes_max),
+        .of(u8),
+        0,
+    );
+}
+
+/// `<folder>/publr` when the site keeps a Publr of its own, else null.
+pub fn own_binary(config: *const Config, folder: []const u8) !?[]const u8 {
+    const path = try std.fs.path.join(config.arena, &.{ folder, binary_name });
+
+    std.Io.Dir.cwd().access(config.io, path, .{}) catch return null;
+
+    return path;
+}
+
+/// What a site runs, said in words: `0.6.4`, `workspace`, `own`, or `none`.
+pub fn running_label(config: *const Config, site: Site) ![]const u8 {
+    if (try own_binary(config, site.folder)) |path| {
+        return if (try links_workspace(config, path)) workspace_name else "own";
+    }
+
+    return (try pin_of(config, site.folder)) orelse "none";
+}
+
+/// The Publr `site` runs: its own, else its pinned release, fetched when missing.
+pub fn binary_for(config: *const Config, site: Site) ![]const u8 {
+    if (try own_binary(config, site.folder)) |path| {
+        return path;
+    }
+
+    const pin = (try pin_of(config, site.folder)) orelse {
+        std.debug.print("publr: {s} pins no Publr: `publr versions use <version> {s}`\n", .{
+            site.name,
+            site.name,
+        });
+        return error.NoPin;
+    };
+
+    return kept(config, pin);
+}
+
+/// `versions/<version>/publr`, fetched first when it is not kept yet.
+pub fn kept(config: *const Config, version: []const u8) ![]const u8 {
+    std.debug.assert(version.len > 0);
+
+    const path = try config.path(&.{ folder_name, version, binary_name });
+
+    std.Io.Dir.cwd().access(config.io, path, .{}) catch {
+        try fetch(config, version);
+    };
+
+    return path;
+}
+
+/// Every release kept, by version.
+pub fn list(config: *const Config) ![]const []const u8 {
+    const root = try config.path(&.{folder_name});
+    var dir = std.Io.Dir.cwd().openDir(config.io, root, .{
+        .iterate = true,
+    }) catch return &.{};
+    defer dir.close(config.io);
+
+    var found: std.ArrayList([]const u8) = .empty;
+    var iterator = dir.iterate();
+
+    while (try iterator.next(config.io)) |item| {
+        if (item.kind != .directory or item.name[0] == '.') {
+            continue;
+        }
+
+        if (std.mem.eql(u8, item.name, workspace_name)) {
+            continue;
+        }
+
+        if (found.items.len == kept_max) {
+            break;
+        }
+
+        try found.append(config.arena, try config.arena.dupe(u8, item.name));
+    }
+
+    std.mem.sort([]const u8, found.items, {}, older);
+
+    return found.items;
+}
+
+fn older(_: void, left: []const u8, right: []const u8) bool {
+    const a = std.SemanticVersion.parse(left) catch return std.mem.order(u8, left, right) == .lt;
+    const b = std.SemanticVersion.parse(right) catch return true;
+
+    return a.order(b) == .lt;
+}
+
+/// The newest release published, or the newest kept when the list cannot be reached.
+pub fn newest(config: *const Config) ![]const u8 {
+    const url = config.environ.get("PUBLR_RELEASES_LATEST") orelse latest_default;
+    var body: std.Io.Writer.Allocating = .init(config.arena);
+
+    if (get(config.io, url, &body.writer)) {
+        const Latest = struct {
+            tag_name: []const u8,
+        };
+        const latest = std.json.parseFromSliceLeaky(Latest, config.arena, body.written(), .{
+            .ignore_unknown_fields = true,
+        }) catch null;
+
+        if (latest) |found| {
+            const tag = found.tag_name;
+            const version = if (tag.len > 0 and tag[0] == 'v') tag[1..] else tag;
+
+            if (std.SemanticVersion.parse(version)) |_| {
+                return version;
+            } else |_| {}
+        }
+    } else |err| {
+        std.debug.print("publr: the newest release could not be asked for ({t})\n", .{err});
+    }
+
+    const all = try list(config);
+
+    if (all.len == 0) {
+        return error.NoRelease;
+    }
+
+    return all[all.len - 1];
+}
+
+/// Release `version`'s binary for this machine into `versions/<version>/`, kept only when
+/// its checksums carry Publr's signature and list the binary's SHA-256.
+pub fn fetch(config: *const Config, version: []const u8) !void {
+    std.debug.assert(version.len > 0);
+
+    _ = std.SemanticVersion.parse(version) catch {
+        std.debug.print("publr: {s} is not a release (0.6.4, say)\n", .{version});
+        return error.NotARelease;
+    };
+
+    const arena = config.arena;
+    const io = config.io;
+    const base = config.environ.get("PUBLR_RELEASES_URL") orelse downloads_default;
+    const cwd = std.Io.Dir.cwd();
+    const partial = try config.path(&.{ folder_name, try std.fmt.allocPrint(arena, ".{s}.partial", .{version}) });
+
+    std.debug.print("publr: fetching Publr {s}…\n", .{version});
+
+    try cwd.deleteTree(io, partial);
+    try cwd.createDirPath(io, partial);
+
+    var files: [3][]const u8 = undefined;
+
+    for ([_][]const u8{ asset_name(), sums_name, signature_name }, 0..) |name, index| {
+        const url = try std.fmt.allocPrint(arena, "{s}/v{s}/{s}", .{ base, version, name });
+        var body: std.Io.Writer.Allocating = .init(arena);
+
+        get(io, url, &body.writer) catch |err| {
+            std.debug.print("publr: {s}: {t}\n", .{ url, err });
+            return error.FetchFailed;
+        };
+
+        files[index] = body.written();
+    }
+
+    if (verified(files[0], files[1], files[2])) |problem| {
+        std.debug.print("publr: Publr {s} refused: {s}\n", .{ version, problem });
+        return error.NotVerified;
+    }
+
+    try cwd.writeFile(io, .{
+        .sub_path = try std.fs.path.join(arena, &.{ partial, binary_name }),
+        .data = files[0],
+        .flags = .{
+            .permissions = .executable_file,
+        },
+    });
+
+    const final = try config.path(&.{ folder_name, version });
+
+    try cwd.deleteTree(io, final);
+    try cwd.rename(partial, cwd, final, io);
+}
+
+/// Null when `binary` is what Publr published: `sums` signed with its key and listing the
+/// binary's SHA-256. Else why not.
+pub fn verified(binary: []const u8, sums: []const u8, signature: []const u8) ?[]const u8 {
+    std.debug.assert(signing_key_hex.len == 64);
+
+    const Ed25519 = std.crypto.sign.Ed25519;
+
+    if (signature.len != Ed25519.Signature.encoded_length) {
+        return "no signature";
+    }
+
+    var key_bytes: [32]u8 = undefined;
+    _ = std.fmt.hexToBytes(&key_bytes, signing_key_hex) catch unreachable;
+    const key = Ed25519.PublicKey.fromBytes(key_bytes) catch unreachable;
+    const parsed = Ed25519.Signature.fromBytes(signature[0..64].*);
+
+    parsed.verify(sums, key) catch return "the checksums' signature is not Publr's";
+
+    const expected = sum_of(sums, asset_name()) orelse
+        return "the checksums do not list this machine's binary";
+    var digest: [32]u8 = undefined;
+
+    std.crypto.hash.sha2.Sha256.hash(binary, &digest, .{});
+
+    const actual = std.fmt.bytesToHex(digest, .lower);
+
+    if (!std.mem.eql(u8, &actual, expected)) {
+        return "the binary is not the one the checksums list";
+    }
+
+    return null;
+}
+
+/// The SHA-256 `sums` (a `SHA256SUMS` file) gives for `file`, as hex.
+pub fn sum_of(sums: []const u8, file: []const u8) ?[]const u8 {
+    std.debug.assert(file.len > 0);
+
+    var lines = std.mem.tokenizeScalar(u8, sums, '\n');
+
+    while (lines.next()) |line| {
+        var words = std.mem.tokenizeAny(u8, line, " *");
+        const digest = words.next() orelse continue;
+        const name = words.next() orelse continue;
+
+        if (std.mem.eql(u8, name, file) and digest.len == 64) {
+            return digest;
+        }
+    }
+
+    return null;
+}
+
+pub fn get(io: std.Io, url: []const u8, out: *std.Io.Writer) !void {
+    std.debug.assert(url.len > 0);
+
+    // Its own memory: TLS loads the system's certificates, more than a request holds.
+    var client_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer client_arena.deinit();
+    var client: std.http.Client = .{
+        .allocator = client_arena.allocator(),
+        .io = io,
+    };
+    defer client.deinit();
+
+    const result = try client.fetch(.{
+        .location = .{
+            .url = url,
+        },
+        .method = .GET,
+        .keep_alive = false,
+        .extra_headers = &.{
+            .{
+                .name = "User-Agent",
+                .value = "publr-cli",
+            },
+            .{
+                .name = "Accept",
+                .value = "application/vnd.github+json",
+            },
+        },
+        .response_writer = out,
+    });
+
+    if (result.status != .ok) {
+        return error.NotFound;
+    }
+}
+
+/// `versions/workspace/bin/publr`: the workspace's Publr, as last built.
+pub fn workspace_binary(config: *const Config) ![]const u8 {
+    return config.path(&.{ folder_name, workspace_name, "bin", binary_name });
+}
+
+fn links_workspace(config: *const Config, path: []const u8) !bool {
+    var buffer: [config_module.path_len_max]u8 = undefined;
+    const length = std.Io.Dir.cwd().readLink(config.io, path, &buffer) catch return false;
+
+    return std.mem.eql(u8, buffer[0..length], try workspace_binary(config));
+}
+
+pub const BuildOptions = struct {
+    /// Debug instead of ReleaseFast: quicker to build, slower to serve.
+    debug: bool = false,
+};
+
+/// `zig build` in the workspace's `publr`, installed into `versions/workspace`: no local
+/// apps or plugins compiled in, since the workspace holds whatever is being worked on.
+pub fn build_workspace(config: *const Config, options: BuildOptions) !void {
+    if (config.workspace.len == 0) {
+        std.debug.print("publr: no workspace yet: `publr config workspace <path>` " ++
+            "(the folder with workspace.zon)\n", .{});
+        return error.NoWorkspace;
+    }
+
+    const arena = config.arena;
+    const io = config.io;
+    const core = try std.fs.path.join(arena, &.{ config.workspace, "publr" });
+    var core_dir = try std.Io.Dir.cwd().openDir(io, core, .{});
+    defer core_dir.close(io);
+
+    try core_dir.createDirPath(io, empty_folder ++ "/apps");
+    try core_dir.createDirPath(io, empty_folder ++ "/plugins");
+
+    std.debug.print("publr: building Publr from {s} ({s}, no local apps or plugins)…\n", .{
+        core,
+        if (options.debug) "Debug" else "ReleaseFast",
+    });
+
+    const prefix = try config.path(&.{ folder_name, workspace_name });
+    const argv = [_][]const u8{
+        "zig",
+        "build",
+        "-Dapps=" ++ empty_folder ++ "/apps",
+        "-Dplugins=" ++ empty_folder ++ "/plugins",
+        if (options.debug) "-Doptimize=Debug" else "-Doptimize=ReleaseFast",
+        "-p",
+        prefix,
+    };
+    var tries: u32 = 0;
+
+    while (tries < build_attempts) : (tries += 1) {
+        const result = try std.process.run(arena, io, .{
+            .argv = &argv,
+            .cwd = .{
+                .path = core,
+            },
+        });
+
+        if (succeeded(result.term)) {
+            return;
+        }
+
+        // Another session editing Publr mid-build fails it: again, a moment later.
+        if (std.mem.indexOf(u8, result.stderr, "file contents changed") == null) {
+            const tail = result.stderr[result.stderr.len -| 3000..];
+
+            std.debug.print("publr: zig build failed:\n{s}\n", .{tail});
+            return error.BuildFailed;
+        }
+
+        try std.Io.sleep(io, .fromSeconds(5), .awake);
+    }
+
+    return error.BuildFailed;
+}
+
+/// The workspace build linked into `site`'s folder, so it runs instead of the pin.
+pub fn link_workspace(config: *const Config, site: Site) !void {
+    const target = try workspace_binary(config);
+    const link = try std.fs.path.join(config.arena, &.{ site.folder, binary_name });
+
+    try unlink_own(config, site);
+    try std.Io.Dir.cwd().symLink(config.io, target, link, .{});
+}
+
+/// The site's own `publr` taken away, when it is a link; a real binary is the person's, and
+/// stays.
+pub fn unlink_own(config: *const Config, site: Site) !void {
+    const link = try std.fs.path.join(config.arena, &.{ site.folder, binary_name });
+    var buffer: [config_module.path_len_max]u8 = undefined;
+
+    _ = std.Io.Dir.cwd().readLink(config.io, link, &buffer) catch |err| switch (err) {
+        error.FileNotFound => return,
+        error.NotLink => {
+            std.debug.print("publr: {s} is a binary of its own, not a link; " ++
+                "remove it to run the pin\n", .{link});
+            return error.OwnBinary;
+        },
+        else => return err,
+    };
+
+    try std.Io.Dir.cwd().deleteFile(config.io, link);
+}
+
+pub fn succeeded(term: std.process.Child.Term) bool {
+    return switch (term) {
+        .exited => |code| code == 0,
+        else => false,
+    };
+}
+
+test "a pin set in publr.zon, added or replaced" {
+    const arena = std.testing.allocator;
+    const added = try with_pin(arena, ".{\n    .name = \"shop\",\n}\n", "0.6.4");
+    defer arena.free(added);
+
+    try std.testing.expectEqualStrings(".{\n    .publr = \"0.6.4\",\n    .name = \"shop\",\n}\n", added);
+
+    const replaced = try with_pin(arena, added, "0.7.0");
+    defer arena.free(replaced);
+
+    try std.testing.expectEqualStrings(".{\n    .publr = \"0.7.0\",\n    .name = \"shop\",\n}\n", replaced);
+}
+
+test "a release's checksum found by file name" {
+    const sums = "aa" ** 32 ++ "  publr-linux-x86_64\n" ++ "bb" ** 32 ++ " *publr-macos-aarch64\n";
+
+    try std.testing.expectEqualStrings("bb" ** 32, sum_of(sums, "publr-macos-aarch64").?);
+    try std.testing.expect(sum_of(sums, "publr-linux-aarch64") == null);
+}

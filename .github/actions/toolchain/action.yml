@@ -1,0 +1,49 @@
+name: The carried compiler
+description: >
+  lib checked out beside cli (its `publr_zig` is a `.path` dependency), Zig, and the compiler
+  `plugin build` carries, built once per target and Zig and kept in the Actions cache, as
+  Publr's own workspace action does. The caller checks out cli into $GITHUB_WORKSPACE/cli and
+  passes -Dtoolchain-archive="$PUBLR_TOOLCHAIN_ARCHIVE" to zig build.
+
+inputs:
+  target:
+    description: The target the command is built for, which the compiler runs on
+    default: native
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v4
+      with: { repository: publr-org/lib, path: lib }
+
+    # Its own cache saves Zig's cache folders on every run, which would push the carried
+    # compiler out of the repository's cache.
+    - uses: mlugg/setup-zig@v2
+      with: { version: 0.16.0, use-cache: false }
+
+    # Building the compiler takes minutes, so it is built only when Zig or the way lib/zig
+    # packs it changes (the key), and saved at once so a later failure keeps it.
+    - id: toolchain
+      uses: actions/cache/restore@v4
+      with:
+        path: zig-toolchain/toolchain.tar.gz
+        key: >-
+          zig-toolchain-baseline-${{ runner.os }}-${{ runner.arch }}-${{ inputs.target }}-${{
+          hashFiles('lib/zig/build/**', 'lib/zig/build.zig.zon', 'cli/.zigversion') }}
+    - name: Build the carried compiler
+      if: steps.toolchain.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: lib/zig
+      # For any CPU of the kind, not the one that built it: the cache moves between machines.
+      run: |
+        zig build toolchain -Dtarget=${{ inputs.target }} -Dcpu=baseline --maxrss 8000000000 \
+          --prefix "$GITHUB_WORKSPACE/zig-toolchain"
+    - if: steps.toolchain.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: zig-toolchain/toolchain.tar.gz
+        key: ${{ steps.toolchain.outputs.cache-primary-key }}
+    - name: Use it
+      shell: bash
+      run: |
+        echo "PUBLR_TOOLCHAIN_ARCHIVE=$GITHUB_WORKSPACE/zig-toolchain/toolchain.tar.gz" >> "$GITHUB_ENV"

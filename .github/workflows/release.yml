@@ -1,0 +1,179 @@
+name: Release
+
+# Actions → Release → Run, choosing patch, minor or major. The next version is built and
+# tested first; only then is its commit tagged and released, so a failed run leaves no tag
+# or Release. The tag is merged into main afterwards. The Homebrew formula in
+# publr-org/homebrew-tap is rewritten to the new release last.
+#
+# Secrets: RELEASE_TOKEN (push the tag and merge), TAP_TOKEN (push to publr-org/homebrew-tap).
+# The checkout of lib beside cli matches Publr's own workspace layout (`.path` dependencies);
+# the compiler `plugin build` carries is built from lib/zig per target and cached
+# (.github/actions/toolchain).
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: What kind of release
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+permissions:
+  contents: write
+
+concurrency: release
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  # The versions written on a release; build.zig.zon is the one read.
+  VERSION_FILES: build.zig.zon src/main.zig
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: cli, fetch-depth: 0 }
+
+      - name: The next version
+        id: next
+        working-directory: cli
+        env: { BUMP: "${{ inputs.bump }}" }
+        run: |
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::release from main, not $GITHUB_REF"; exit 1
+          fi
+          current="$(sed -nE 's/^ *\.version = "([0-9]+\.[0-9]+\.[0-9]+)",$/\1/p' build.zig.zon)"
+          IFS=. read -r major minor patch <<< "$current"
+          case "$BUMP" in
+            major) version="$((major + 1)).0.0" ;;
+            minor) version="$major.$((minor + 1)).0" ;;
+            *)     version="$major.$minor.$((patch + 1))" ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: cli }
+      - uses: actions/checkout@v4
+        with: { repository: publr-org/publr, path: publr }
+      - uses: ./cli/.github/actions/toolchain
+      - name: zig build test
+        working-directory: cli
+        run: zig build test -Dtoolchain-archive="$PUBLR_TOOLCHAIN_ARCHIVE"
+
+  # Linux is cross-compiled against musl; each macOS binary is built on its own kind of CPU,
+  # as Publr's are, since the compiler it carries is Zig built for that target.
+  build:
+    needs: [version, test]
+    strategy:
+      matrix:
+        include:
+          - { runner: ubuntu-latest, target: x86_64-linux-musl, file: publr-linux-x86_64 }
+          - { runner: ubuntu-latest, target: aarch64-linux-musl, file: publr-linux-aarch64 }
+          - { runner: macos-latest, target: native, file: publr-macos-aarch64 }
+          - { runner: macos-15-intel, target: native, file: publr-macos-x86_64 }
+    runs-on: ${{ matrix.runner }}
+    env: { VERSION: "${{ needs.version.outputs.version }}" }
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: cli }
+      - uses: ./cli/.github/actions/toolchain
+        with: { target: "${{ matrix.target }}" }
+
+      - name: Write the version
+        working-directory: cli
+        run: &write_version |
+          sed -i -E "s/^( *\.version = \")[0-9]+\.[0-9]+\.[0-9]+(\",)$/\1$VERSION\2/" build.zig.zon
+          sed -i -E "s/^(pub const version = \")[0-9]+\.[0-9]+\.[0-9]+(\";)$/\1$VERSION\2/" src/main.zig
+          grep -q "\"$VERSION\"" build.zig.zon && grep -q "\"$VERSION\"" src/main.zig
+
+      - name: zig build
+        working-directory: cli
+        run: |
+          zig build -Dtarget=${{ matrix.target }} -Dcpu=baseline -Doptimize=ReleaseSafe \
+            -Dtoolchain-archive="$PUBLR_TOOLCHAIN_ARCHIVE" --prefix ../out
+          cp ../out/bin/publr ../${{ matrix.file }}
+
+      - name: Check it reports the version
+        if: matrix.target != 'aarch64-linux-musl'
+        run: test "$(./${{ matrix.file }} --version)" = "publr $VERSION"
+
+      - uses: actions/upload-artifact@v4
+        with: { name: "${{ matrix.file }}", path: "${{ matrix.file }}" }
+
+  release:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      TAG: v${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: cli, fetch-depth: 0, token: "${{ secrets.RELEASE_TOKEN }}" }
+      - uses: actions/download-artifact@v4
+        with: { path: dist, pattern: "publr-*", merge-multiple: true }
+
+      - name: Write the version
+        working-directory: cli
+        run: *write_version
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          cp ../cli/install.sh .
+          chmod +x publr-*
+          sha256sum publr-* install.sh > SHA256SUMS
+          for file in publr-*; do sha256sum "$file" > "$file.sha256"; done
+          cat SHA256SUMS
+
+      - name: Commit the version and tag it
+        working-directory: cli
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -qam "Release $TAG"
+          git tag "$TAG"
+          git push origin "$TAG"
+
+      - name: Release
+        working-directory: dist
+        run: |
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes \
+            --title "publr $VERSION" publr-* install.sh SHA256SUMS
+
+      - name: Merge the release into main
+        working-directory: cli
+        run: |
+          git fetch -q origin main
+          git checkout -q main
+          git reset -q --hard origin/main
+          git merge -q --no-edit "$TAG"
+          git push -q origin main
+
+      - name: Homebrew formula
+        env: { TAP_TOKEN: "${{ secrets.TAP_TOKEN }}" }
+        run: |
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "::warning::TAP_TOKEN is not set: the Homebrew formula was not updated"; exit 0
+          fi
+          git clone -q "https://x-access-token:$TAP_TOKEN@github.com/publr-org/homebrew-tap" tap
+          mkdir -p tap/Formula
+          sum() { cut -d' ' -f1 < "dist/$1.sha256"; }
+          sed -e "s/@VERSION@/$VERSION/g" \
+              -e "s/@MACOS_AARCH64@/$(sum publr-macos-aarch64)/" \
+              -e "s/@MACOS_X86_64@/$(sum publr-macos-x86_64)/" \
+              -e "s/@LINUX_AARCH64@/$(sum publr-linux-aarch64)/" \
+              -e "s/@LINUX_X86_64@/$(sum publr-linux-x86_64)/" \
+              cli/packaging/homebrew/publr.rb > tap/Formula/publr.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/publr.rb
+          git commit -qm "publr $VERSION"
+          git push -q origin HEAD
