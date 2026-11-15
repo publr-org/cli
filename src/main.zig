@@ -47,9 +47,11 @@ const usage =
     \\  publr config               where sites go and which folders hold them
     \\    config folder <path>       the default folder
     \\    config folders add|remove <path>
-    \\    config publr <path>|<release>|pins [<name>...]
+    \\    config publr <path>|<release> [<name>...]
     \\                               a Publr those sites (or every site) run instead of
-    \\                               their pins (one built from source, say); `pins` undoes it
+    \\                               their pinned releases (one built from source, say)
+    \\    config publr --unset [<name>...]
+    \\                               back to their pinned releases
     \\  publr versions             the Publr releases kept, and which site runs which
     \\    versions use <version> <name>...|--all
     \\
@@ -813,8 +815,8 @@ fn configure(config: *Config, out: *std.Io.Writer, rest: []const []const u8) !vo
         config.folder = try core.sites.absolute(config, rest[1]);
         try std.Io.Dir.cwd().createDirPath(config.io, config.folder);
     } else if (std.mem.eql(u8, rest[0], "publr") and rest.len >= 2) {
-        const pins = std.mem.eql(u8, rest[1], "pins");
-        const chosen = if (pins) "" else try versions.resolve(config, rest[1]);
+        const unset = std.mem.eql(u8, rest[1], "--unset");
+        const chosen = if (unset) "" else try versions.resolve(config, rest[1]);
 
         if (rest.len == 2) {
             config.publr = chosen;
@@ -836,7 +838,7 @@ fn configure(config: *Config, out: *std.Io.Writer, rest: []const []const u8) !vo
                     try server.start(config, &site, try versions.binary_for(config, site));
                 }
 
-                try out.print("{s} runs {s}\n", .{ site.name, if (pins) "its pinned release" else chosen });
+                try out.print("{s} runs {s}\n", .{ site.name, if (unset) "its pinned release" else chosen });
             }
 
             return;
