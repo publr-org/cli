@@ -23,14 +23,14 @@ type Progressed = {
   database_bytes: number;
   media_files: number;
   media_bytes: number;
-  /** `down` (a clone) or `up` (a deploy to Cloud). */
-  direction: string;
   /** Up, once done: where it is live, and its admin signed in once. */
   address: string;
   admin: string;
 };
 
 export type CloneStepsProps = {
+  /** `down` (a clone) or `up` (a deploy to Cloud). */
+  direction: string;
   /** The bar's parts as the site weighs them, with media and without. */
   marks_all: Mark[];
   marks_setup: Mark[];
@@ -52,7 +52,7 @@ const unreached = (error: unknown) => /fetch|load failed|network/i.test(String((
 
 /** Where the clone is: the headline and its time, the bar, the choice of what comes down, and
  * the way into the site once its own server answers. */
-export function CloneSteps({ marks_all, marks_setup, ctx }: CloneStepsProps) {
+export function CloneSteps({ direction, marks_all, marks_setup, ctx }: CloneStepsProps) {
   const state = Publr.reactive({
     phase: "packing",
     packed_through: 0,
@@ -66,9 +66,7 @@ export function CloneSteps({ marks_all, marks_setup, ctx }: CloneStepsProps) {
     /** The site's own server answers (down) or Cloud made it live (up): the page can open it. */
     here: false,
     /** `up` while the site goes up to Cloud. */
-    up: false,
-    /** One answer came: which way the site moves is known. */
-    known: false,
+    up: direction === "up",
     address: "",
     admin: "",
     asking: false,
@@ -225,8 +223,6 @@ export function CloneSteps({ marks_all, marks_setup, ctx }: CloneStepsProps) {
         state.unpacked_bytes = found.unpacked_bytes;
         state.media = found.media;
         state.problem = found.problem;
-        state.up = found.direction === "up";
-        state.known = true;
         state.address = found.address;
         state.admin = found.admin;
         if (found.phase === "choosing" && !state.choosing && state.everything === "") {
@@ -251,9 +247,8 @@ export function CloneSteps({ marks_all, marks_setup, ctx }: CloneStepsProps) {
         }
       } catch {
         // The clone's server stopped answering: it is handing over to the site's server.
-        // Up, the page's own server stays until the end has been shown; and before any
-        // answer, which way is not known yet: asked again.
-        if (!state.up && (state.known || !unreached(read.error))) {
+        // Up, the page's own server stays until the end has been shown: asked again.
+        if (!state.up) {
           await hand_over();
           break;
         }

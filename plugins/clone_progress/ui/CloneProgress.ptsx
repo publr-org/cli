@@ -25,7 +25,7 @@ export function CloneProgress({ name, folder, direction, marks_all, marks_setup,
   const title = direction === "up" ? Publr.t("Deploying {name}", { name }) : Publr.t("Pulling {name}", { name });
   return (
     <CardPage wide lattice title={title} description={folder}>
-      <CloneSteps marks_all={marks_all} marks_setup={marks_setup} ctx={ctx} />
+      <CloneSteps direction={direction} marks_all={marks_all} marks_setup={marks_setup} ctx={ctx} />
     </CardPage>
   );
 }
