@@ -82,7 +82,6 @@ fn make(
 ) !Site {
     const name = std.fs.path.basename(folder);
     const version = try pick(config, options.publr);
-    const publr = try versions.kept(config, version);
     const cwd = std.Io.Dir.cwd();
 
     try cwd.createDirPath(config.io, folder);
@@ -101,7 +100,7 @@ fn make(
     var site = try sites_module.load(config, folder, entry);
 
     site.local.created_ms = server.now_ms(config.io);
-    try set_up(config, &site, publr, self_path);
+    try set_up(config, &site, try versions.binary_for(config, site), self_path);
 
     return site;
 }

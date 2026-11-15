@@ -100,6 +100,13 @@ fn binary_here(config: *const Config, folder: []const u8, packed_by: []const u8)
         } else |_| {}
     }
 
+    // A Publr chosen for this call or for every site comes before the one that packed it.
+    for ([_][]const u8{ config.call_publr, config.publr }) |chosen| {
+        if (chosen.len > 0) {
+            return chosen;
+        }
+    }
+
     return versions.kept(config, packed_by);
 }
 
