@@ -10,6 +10,8 @@ export type CloneProgressProps = {
   name: string;
   /** The folder it goes into, by its last names (`clone-test/shop`). */
   folder: string;
+  /** `down` (a clone) or `up` (a deploy to Cloud). */
+  direction: string;
   /** The bar's parts with media, and without (database and setup only). */
   marks_all: Mark[];
   marks_setup: Mark[];
@@ -17,10 +19,12 @@ export type CloneProgressProps = {
 };
 
 /** `publr clone` while it runs, before the site is here: drawn on the clone's own server,
- * then handed over to the site's own server on the same address. */
-export function CloneProgress({ name, folder, marks_all, marks_setup, ctx }: CloneProgressProps) {
+ * then handed over to the site's own server on the same address. `publr deploy` while the
+ * site goes up to Cloud: drawn on a server of its own beside the site's. */
+export function CloneProgress({ name, folder, direction, marks_all, marks_setup, ctx }: CloneProgressProps) {
+  const title = direction === "up" ? Publr.t("Deploying {name}", { name }) : Publr.t("Pulling {name}", { name });
   return (
-    <CardPage wide lattice title={Publr.t("Pulling {name}", { name })} description={folder}>
+    <CardPage wide lattice title={title} description={folder}>
       <CloneSteps marks_all={marks_all} marks_setup={marks_setup} ctx={ctx} />
     </CardPage>
   );

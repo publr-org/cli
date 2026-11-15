@@ -288,7 +288,7 @@ pub fn fetch(config: *const Config, version: []const u8) !void {
         var body: std.Io.Writer.Allocating = .init(arena);
 
         get(io, url, &body.writer) catch |err| {
-            std.debug.print("publr: {s}: {t}\n", .{ url, err });
+            std.debug.print("publr: couldn't download Publr {s}: {t} ({s})\n", .{ version, err, url });
             return error.FetchFailed;
         };
 

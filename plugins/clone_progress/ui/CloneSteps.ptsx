@@ -23,6 +23,11 @@ type Progressed = {
   database_bytes: number;
   media_files: number;
   media_bytes: number;
+  /** `down` (a clone) or `up` (a deploy to Cloud). */
+  direction: string;
+  /** Up, once done: where it is live, and its admin signed in once. */
+  address: string;
+  admin: string;
 };
 
 export type CloneStepsProps = {
@@ -58,8 +63,14 @@ export function CloneSteps({ marks_all, marks_setup, ctx }: CloneStepsProps) {
     media: true,
     problem: "",
     elapsed_ms: 0,
-    /** The site's own server answers: the page can open it. */
+    /** The site's own server answers (down) or Cloud made it live (up): the page can open it. */
     here: false,
+    /** `up` while the site goes up to Cloud. */
+    up: false,
+    /** One answer came: which way the site moves is known. */
+    known: false,
+    address: "",
+    admin: "",
     asking: false,
     /** What the page shows, kept here as values so the page redraws when they change. */
     percent: 0,
@@ -83,6 +94,14 @@ export function CloneSteps({ marks_all, marks_setup, ctx }: CloneStepsProps) {
   /** How far through the site's bytes the clone is, in one pass: a third of the way while the
    * site packs it, a third while it downloads, the last third while it unpacks. */
   const through = () => {
+    if (state.up) {
+      // Up: packing here is the first tenth, the upload the most of it, Cloud the rest.
+      const sent = state.total_bytes > 0 ? state.done_bytes / state.total_bytes : 0;
+      if (state.here) return 1;
+      if (state.phase === "uploading") return 0.1 + sent * 0.8;
+      if (state.phase === "going_live") return 0.95;
+      return 0.05;
+    }
     if (state.here || state.phase === "placeholders" || state.phase === "starting") return 1;
     const total = layout().reduce((sum, mark) => sum + mark.bytes, 0);
     const downloaded = state.total_bytes > 0 ? state.done_bytes / state.total_bytes : 0;
@@ -110,6 +129,11 @@ export function CloneSteps({ marks_all, marks_setup, ctx }: CloneStepsProps) {
   const doing = () => {
     if (state.here) return Publr.t("Done");
     if (state.phase === "failed") return Publr.t("It stopped");
+    if (state.up) {
+      if (state.phase === "uploading") return Publr.t("Uploading");
+      if (state.phase === "going_live") return Publr.t("Going live on Cloud");
+      return Publr.t("Packing it here");
+    }
     if (state.phase === "choosing") return Publr.t("What should come down?");
     if (state.phase === "packing") return Publr.t("Packing it on its server");
     if (state.phase === "downloading") {
@@ -131,9 +155,11 @@ export function CloneSteps({ marks_all, marks_setup, ctx }: CloneStepsProps) {
     state.width = `${whole}%`;
     state.headline = state.phase === "choosing" || state.phase === "failed" ? doing() : `${state.percent}% · ${doing()}`;
     state.timer = state.here
-      ? Publr.t("Pulled in {time}", { time: clock(state.elapsed_ms) })
+      ? state.up
+        ? Publr.t("Deployed in {time}", { time: clock(state.elapsed_ms) })
+        : Publr.t("Pulled in {time}", { time: clock(state.elapsed_ms) })
       : Publr.t("Time elapsed {time}", { time: clock(state.elapsed_ms) });
-    state.downloaded = state.phase === "downloading" && state.total_bytes > 0
+    state.downloaded = (state.phase === "downloading" || state.phase === "uploading") && state.total_bytes > 0
       ? Publr.t("{done} of {total} MB", {
           done: (state.done_bytes / 1048576).toFixed(1),
           total: (state.total_bytes / 1048576).toFixed(1),
@@ -154,6 +180,13 @@ export function CloneSteps({ marks_all, marks_setup, ctx }: CloneStepsProps) {
   };
   const take_setup = () => {
     void choose("none");
+  };
+  /** Up, once done: the live site, and its admin signed in once, each in a window of its own. */
+  const open_live = () => {
+    window.open(state.address, "_blank");
+  };
+  const open_admin = () => {
+    window.open(state.admin, "_blank");
   };
 
   /** The clone's own server stops once the site is in its folder, and the site's own server
@@ -192,6 +225,10 @@ export function CloneSteps({ marks_all, marks_setup, ctx }: CloneStepsProps) {
         state.unpacked_bytes = found.unpacked_bytes;
         state.media = found.media;
         state.problem = found.problem;
+        state.up = found.direction === "up";
+        state.known = true;
+        state.address = found.address;
+        state.admin = found.admin;
         if (found.phase === "choosing" && !state.choosing && state.everything === "") {
           state.choosing = true;
           state.everything = Publr.t("Everything · {size}", {
@@ -205,16 +242,21 @@ export function CloneSteps({ marks_all, marks_setup, ctx }: CloneStepsProps) {
             : Publr.t("Database and setup · {size}", { size: sized(found.database_bytes) });
         }
         state.elapsed_ms = found.elapsed_ms;
+        if (state.up && found.phase === "done") state.here = true;
         show();
-        if (found.phase === "failed") break;
+        if (found.phase === "failed" || (state.up && found.phase === "done")) break;
         if (found.phase === "starting") {
           await hand_over();
           break;
         }
       } catch {
         // The clone's server stopped answering: it is handing over to the site's server.
-        await hand_over();
-        break;
+        // Up, the page's own server stays until the end has been shown; and before any
+        // answer, which way is not known yet: asked again.
+        if (!state.up && (state.known || !unreached(read.error))) {
+          await hand_over();
+          break;
+        }
       }
       await new Promise((resolve) => window.setTimeout(resolve, 300));
     }
@@ -272,10 +314,20 @@ export function CloneSteps({ marks_all, marks_setup, ctx }: CloneStepsProps) {
           })}
         </Text>
       )}
-      {state.here && (
+      {state.here && !state.up && (
         <div class="flex justify-end">
           <Button href="/admin" hierarchy="primary" size="md">
             {Publr.t("Open your site")}
+          </Button>
+        </div>
+      )}
+      {state.here && state.up && (
+        <div class="flex justify-end gap-2">
+          <Button type="button" hierarchy="secondary" size="md" onClick={open_live}>
+            {Publr.t("Open on Cloud")}
+          </Button>
+          <Button type="button" hierarchy="primary" size="md" onClick={open_admin}>
+            {Publr.t("Open admin")}
           </Button>
         </div>
       )}

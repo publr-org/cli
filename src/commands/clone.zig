@@ -125,7 +125,7 @@ pub fn run(
     const asking = !asked.media_given;
     var arriving: Arriving = undefined;
 
-    try arriving.open(config, publr, release, site.email, port, .{
+    try arriving.open(config, publr, release, site.email, port, "cloning", .{
         .name = name,
         .folder = shown_folder(folder),
         .phase = if (asking) "choosing" else "packing",

@@ -1,8 +1,9 @@
-//! A clone's progress, seen in the browser while `publr clone` brings a site down: the page
-//! the clone opens, drawn alone (no admin around it) on the server the command starts for
-//! the clone with this plugin given (`serve --plugin`). The command tells it where the clone
-//! is (`clone_progress.update`) and reads what the person chose to bring down
-//! (`clone_progress.state`); the page reads the same and chooses (`clone_progress.choose`).
+//! A site moving between this computer and a Publr elsewhere, seen in the browser: the page
+//! `publr clone` opens while a site comes down, and `publr deploy` while one goes up to
+//! Cloud, drawn alone (no admin around it) on a server the command starts with this plugin
+//! given (`serve --plugin`). The command tells it where the move is (`clone_progress.update`)
+//! and reads what the person chose to bring down; the page reads the same
+//! (`clone_progress.state`) and chooses (`clone_progress.choose`).
 const std = @import("std");
 const publr = @import("publr");
 
@@ -15,18 +16,20 @@ const manifest: publr.Manifest = .{
 ///
 /// Where the clone is: one record, written by the command as it goes.
 pub const Clone = struct {
+    /// `down` (a clone, coming to this computer) or `up` (a deploy, going to Cloud).
+    direction: []const u8 = "down",
     /// The site's short name, for the page's title.
     name: []const u8 = "",
     /// The folder it goes into, as the page names it.
     folder: []const u8 = "",
-    /// `choosing`, `packing`, `downloading`, `unpacking`, `placeholders`, `starting` or
-    /// `failed`.
+    /// Down: `choosing`, `packing`, `downloading`, `unpacking`, `placeholders`, `starting`.
+    /// Up: `packing`, `uploading`, `going_live`, `done`. Either: `failed`.
     phase: []const u8 = "packing",
     /// How far the site is packing it, in ten-thousandths.
     packed_through: u32 = 0,
-    /// Bytes downloaded so far.
+    /// Bytes downloaded (or uploaded) so far.
     done_bytes: u64 = 0,
-    /// Bytes the download holds.
+    /// Bytes the download (or upload) holds.
     total_bytes: u64 = 0,
     /// Media files placeholders stand in for.
     placeholders: u32 = 0,
@@ -50,6 +53,10 @@ pub const Clone = struct {
     elapsed_ms: u64 = 0,
     /// What the person chose on the page: `all`, `none`, or empty while nobody has.
     chosen: []const u8 = "",
+    /// Up, once done: where the site is live.
+    address: []const u8 = "",
+    /// Up, once done: its admin, signed in once (a sign-on link good for a minute).
+    admin: []const u8 = "",
 };
 
 pub const Stored = publr.record.define(Clone, .{
@@ -61,7 +68,8 @@ pub const Stored = publr.record.define(Clone, .{
 const the_clone = publr.query.prepare(
     \\*[_type == "clone_progress.clone"][0]{ "id": _id, name, folder, phase, packed_through,
     \\  done_bytes, total_bytes, placeholders, unpacked_bytes, media, database_bytes,
-    \\  media_files, media_bytes, apps_bytes, plugins_bytes, problem, elapsed_ms, chosen }
+    \\  media_files, media_bytes, apps_bytes, plugins_bytes, problem, elapsed_ms, chosen, direction,
+    \\  address, admin }
 , .{});
 
 const Found = struct {
@@ -83,6 +91,9 @@ const Found = struct {
     problem: []const u8 = "",
     elapsed_ms: u64 = 0,
     chosen: []const u8 = "",
+    direction: []const u8 = "down",
+    address: []const u8 = "",
+    admin: []const u8 = "",
 };
 
 fn found_of(ctx: *publr.Ctx) publr.Error!?Found {
@@ -108,6 +119,9 @@ fn clone_of(found: Found) Clone {
         .problem = found.problem,
         .elapsed_ms = found.elapsed_ms,
         .chosen = found.chosen,
+        .direction = found.direction,
+        .address = found.address,
+        .admin = found.admin,
     };
 }
 
@@ -118,7 +132,7 @@ pub const UpdateOut = struct {
     chosen: []const u8,
 };
 
-/// Where the clone is now, from the command; answers what the person chose so far.
+/// Where the move is now, from the command; answers what the person chose so far.
 ///
 /// Administrators. The choice is the page's: an update keeps the one made.
 ///
@@ -261,7 +275,7 @@ pub const PageOut = struct {
     html: []const u8,
 };
 
-/// Draws the clone's progress page.
+/// Draws the move's progress page.
 ///
 /// Administrators.
 ///
@@ -284,6 +298,7 @@ fn page(ctx: *publr.Ctx, in: PageIn) publr.Error!PageOut {
         .html = try publr.views.render(ctx, in.base, View, .{
             .name = now.name,
             .folder = now.folder,
+            .direction = now.direction,
             .marks_all = try marks_of(View.Marks_allItem, ctx, now, true),
             .marks_setup = try marks_of(View.Marks_setupItem, ctx, now, false),
         }),
@@ -297,7 +312,18 @@ const share_min_percent: f64 = 12;
 /// `share_min_percent` wide so its name can be read, the rest shared by weight. None for a
 /// site that did not say.
 fn marks_of(comptime Item: type, ctx: *publr.Ctx, now: Clone, media: bool) publr.Error![]const Item {
-    const parts = [_]struct {
+    const up = std.mem.eql(u8, now.direction, "up");
+    // A deploy's bar is its steps, as the page moves through them: packing here a tenth, the
+    // upload most of it, Cloud the rest.
+    const parts = if (up) [_]struct {
+        []const u8,
+        u64,
+    }{
+        .{ "Packing", 10 },
+        .{ "Uploading", 80 },
+        .{ "Going live", 10 },
+        .{ "", 0 },
+    } else [_]struct {
         []const u8,
         u64,
     }{
@@ -360,7 +386,7 @@ fn marks_of(comptime Item: type, ctx: *publr.Ctx, now: Clone, media: bool) publr
 
 const progress_page: publr.plugin.Page = .{
     .path = "progress",
-    .label = "Pulling",
+    .label = "Progress",
     .icon = "sync",
     .operation = Page,
     .menu = .none,

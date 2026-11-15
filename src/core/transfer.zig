@@ -161,13 +161,14 @@ pub fn size_of(io: std.Io, arena: std.mem.Allocator, site: credentials.Site) !?S
     });
 }
 
-/// Who else hears how far a pack or a download is, beside the terminal: a clone's progress
-/// page.
+/// Who else hears how far a pack, a download or an upload is, beside the terminal: a clone's
+/// or a deploy's progress page.
 pub const Watch = struct {
     context: ?*anyopaque = null,
     /// How far the site is packing it, in ten-thousandths.
     packing: ?*const fn (context: *anyopaque, through: u32) void = null,
     downloading: ?*const fn (context: *anyopaque, done_bytes: u64, total_bytes: u64) void = null,
+    uploading: ?*const fn (context: *anyopaque, done_bytes: u64, total_bytes: u64) void = null,
 };
 
 /// The site packed for a clone (`asked`: what `POST /api/sites/pack` takes), followed until
@@ -326,6 +327,8 @@ pub const Upload = struct {
     json: bool = false,
     /// How later parts name the upload (`send_in_parts`).
     parts: Parts = .named,
+    /// Told the bytes sent and the size at each report too (a progress page).
+    watch: Watch = .{},
 };
 
 /// How a part says which upload it adds to. `named`: the first part's answer names it
@@ -517,6 +520,10 @@ fn post_part(
 
 fn report(upload: Upload, done: u64, size: u64) !void {
     std.debug.assert(done <= size);
+
+    if (upload.watch.uploading) |told| {
+        told(upload.watch.context.?, done, size);
+    }
 
     if (upload.json) {
         try upload.out.print("{{\"stage\":\"uploading\",\"done\":{d},\"total\":{d}}}\n", .{ done, size });

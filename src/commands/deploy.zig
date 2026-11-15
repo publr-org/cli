@@ -3,10 +3,12 @@
 //! dashboard, which makes it a project at the address asked for (or one made from the
 //! folder's name); then the folder carries the link to it (`cloud.json`) and this computer is
 //! signed in there, so it pulls and pushes. A linked folder is refused: its changes go up as
-//! a branch, never over the live site.
+//! a branch, never over the live site. While it goes, the clone's progress page shows it, on
+//! a server of its own beside the site's (`clone/arriving.zig`).
 
 const std = @import("std");
 const core = @import("../core.zig");
+const Arriving = @import("clone/arriving.zig").Arriving;
 
 const Config = core.Config;
 const archive = core.archive;
@@ -22,12 +24,26 @@ const upload_piece_bytes: u32 = 256 << 10;
 const ending_len: u32 = 6;
 const slug_len_max: u32 = 63;
 const spaces_max: u32 = 64;
+/// The scratch site's own administrator, who watches the page; nobody signs in as it
+/// elsewhere.
+const page_email = "deploy@publr.localhost";
+/// How long the page's server stays after the end while a page is shown, for it to show
+/// the end (it asks every few hundred milliseconds).
+const shown_linger_ms: u32 = 15_000;
+/// How long Cloud may take to answer at the new address.
+const live_wait_ms: u32 = 90_000;
 
 pub const usage =
     \\usage: publr deploy [--space <space>] [--slug <address>] [--name <name>] [--cloud <dashboard>]
-    \\                    [--progress json]
+    \\                    [--progress json] [--no-open]
     \\
 ;
+
+/// What Cloud said when it refused, for the page.
+var refused_because: []const u8 = "";
+/// How long the page's server stays after the end: only while a page is shown, opened in
+/// the browser or by the program driving the command (`--progress json`).
+var linger_ms: u32 = 0;
 
 const Options = struct {
     space: []const u8 = "",
@@ -37,8 +53,11 @@ const Options = struct {
     /// One JSON line per step on stdout instead of the words, for a program driving it
     /// (Publr Studio): `{"stage":"packing"}`, `{"stage":"uploading","done":…,"total":…}`,
     /// `{"stage":"starting"}`, `{"stage":"done","address":…,"admin":…,…}`, or
-    /// `{"stage":"failed","error":…,"message":…}`.
+    /// `{"stage":"failed","error":…,"message":…}`. `{"stage":"page","url":…}` names the
+    /// progress page as soon as it is up.
     json: bool = false,
+    /// The progress page opened in the browser (not with `--no-open`).
+    open: bool = true,
 };
 
 const Deployed = struct {
@@ -54,9 +73,22 @@ fn parse(args: []const []const u8) ?Options {
     var options: Options = .{};
     var index: u32 = 0;
 
-    while (index + 1 < args.len) : (index += 2) {
+    while (index < args.len) {
         const flag = args[index];
+
+        if (std.mem.eql(u8, flag, "--no-open")) {
+            options.open = false;
+            index += 1;
+            continue;
+        }
+
+        if (index + 1 == args.len) {
+            return null;
+        }
+
         const value = args[index + 1];
+
+        index += 2;
 
         if (std.mem.eql(u8, flag, "--space")) {
             options.space = value;
@@ -162,13 +194,132 @@ fn deploy(
     folder: []const u8,
     options: Options,
 ) !u8 {
-    const config = client.config;
-    const arena = config.arena;
-
     if (!try address_free(client, out, options.slug)) {
         return 1;
     }
 
+    var arriving: Arriving = undefined;
+    const page = open_page(init, client, out, publr, &arriving, options);
+    const code = go(init, client, out, publr, folder, page, options) catch |err| {
+        stopped(page, @errorName(err));
+        return err;
+    };
+
+    if (code != 0) {
+        stopped(page, if (refused_because.len > 0) refused_because else "Publr Cloud did not make it.");
+    }
+
+    return code;
+}
+
+/// The progress page up beside the site, named and opened; null, having said why, when it
+/// could not be (the deploy goes on without it).
+fn open_page(
+    init: std.process.Init,
+    client: Client,
+    out: *std.Io.Writer,
+    publr: []const u8,
+    arriving: *Arriving,
+    options: Options,
+) ?*Arriving {
+    const config = client.config;
+    const release = release_of(config, publr) catch |err| {
+        std.log.warn("deploy progress: which Publr: {t}", .{err});
+        return null;
+    };
+    const sites = core.Sites.find(config) catch |err| {
+        std.log.warn("deploy progress: {t}", .{err});
+        return null;
+    };
+    const port = sites.free_port(&core.server.listening) catch |err| {
+        std.log.warn("deploy progress: {t}", .{err});
+        return null;
+    };
+    const where = std.fmt.allocPrint(config.arena, "Publr Cloud · {s}", .{options.slug}) catch return null;
+
+    arriving.open(config, publr, release, page_email, port, "deploying", .{
+        .direction = "up",
+        .name = options.name,
+        .folder = where,
+    }) catch |err| {
+        std.log.warn("deploy progress: the page did not start: {t}", .{err});
+        return null;
+    };
+
+    const link = arriving.link() catch return null;
+
+    out.print("Deploying {s} to Cloud. Follow it at {s}\n", .{ options.name, link }) catch {};
+    out.flush() catch {};
+    client.event(.{
+        .stage = "page",
+        .url = link,
+    }) catch {};
+
+    if (options.open and !options.json and init.environ_map.get("PUBLR_NO_BROWSER") == null) {
+        core.login.open_browser(init, link);
+        linger_ms = shown_linger_ms;
+    }
+
+    if (options.json) {
+        linger_ms = shown_linger_ms;
+    }
+
+    return arriving;
+}
+
+/// The release `publr` is (`publr --version`): where the page's plugin is kept built.
+fn release_of(config: *const Config, publr: []const u8) ![]const u8 {
+    const result = try std.process.run(config.arena, config.io, .{
+        .argv = &.{ publr, "--version" },
+    });
+    const said = std.mem.trim(u8, result.stdout, " \r\n");
+    const prefix = "publr ";
+
+    if (!versions.succeeded(result.term) or !std.mem.startsWith(u8, said, prefix)) {
+        return error.NoVersion;
+    }
+
+    return said[prefix.len..];
+}
+
+/// The page says why it stopped, keeps its server while the person reads it, then goes.
+fn stopped(page: ?*Arriving, why: []const u8) void {
+    const arriving = page orelse return;
+
+    arriving.progress.phase = "failed";
+    arriving.progress.problem = why;
+    arriving.finish(linger_ms);
+}
+
+/// The page told the phase now.
+fn phase(page: ?*Arriving, now: []const u8) void {
+    const arriving = page orelse return;
+
+    arriving.progress.phase = now;
+    _ = arriving.feed(true) catch "";
+}
+
+/// The upload's bytes, told to the page as they go.
+fn told_uploaded(context: *anyopaque, done: u64, size: u64) void {
+    const arriving: *Arriving = @ptrCast(@alignCast(context));
+
+    arriving.progress.phase = "uploading";
+    arriving.progress.done_bytes = done;
+    arriving.progress.total_bytes = size;
+    _ = arriving.feed(done == size) catch "";
+}
+
+fn go(
+    init: std.process.Init,
+    client: Client,
+    out: *std.Io.Writer,
+    publr: []const u8,
+    folder: []const u8,
+    page: ?*Arriving,
+    options: Options,
+) !u8 {
+    const config = client.config;
+    const arena = config.arena;
     const exported = try site_data.scratch_beside(config, folder, "deploy");
     const file = try std.fmt.allocPrint(arena, "{s}{s}", .{ exported, archive.extension });
     defer {
@@ -184,18 +335,25 @@ fn deploy(
     try client.event(.{
         .stage = "packing",
     });
+    phase(page, "packing");
     try progress(out, "Packing the site", .{});
     try site_data.export_to(config, publr, folder, exported, .{});
 
     const made = try archive.write(config.io, arena, exported, file, .{});
 
     try out.print("{d} files\n", .{made.files});
+    phase(page, "uploading");
 
-    const upload = try client.upload(out, file) orelse return 1;
+    const watch: transfer.Watch = if (page) |arriving| .{
+        .context = arriving,
+        .uploading = &told_uploaded,
+    } else .{};
+    const upload = try client.upload(out, file, watch) orelse return 1;
 
     try client.event(.{
         .stage = "starting",
     });
+    phase(page, "going_live");
     try progress(out, "Starting it on Cloud", .{});
 
     const sent = try std.json.Stringify.valueAlloc(arena, .{
@@ -217,6 +375,9 @@ fn deploy(
         .admin = deployed.admin,
         .deployed_at_ms = core.server.now_ms(config.io),
     });
+    try sign_in_folder(init, client, out, deployed);
+    // Done once the project answers at its address, as the person will open it.
+    answers_at(config, deployed.address);
     try client.event(.{
         .stage = "done",
         .address = deployed.address,
@@ -232,10 +393,58 @@ fn deploy(
         deployed.admin,
         links.cloud_name,
     });
-    try sign_in_folder(init, client, out, deployed);
+
+    if (page) |arriving| {
+        arriving.progress.address = deployed.address;
+        arriving.progress.admin = admin_link(client, deployed) catch deployed.admin;
+        arriving.progress.phase = "done";
+        arriving.finish(linger_ms);
+    }
 
     return 0;
 }
+
+/// Until `address` answers its health check, at most `live_wait_ms`; Cloud starts a new
+/// project's machine on its first request.
+fn answers_at(config: *const Config, address: []const u8) void {
+    const url = std.fmt.allocPrint(config.arena, "{s}/api/health", .{address}) catch return;
+    var waited: u32 = 0;
+
+    while (waited < live_wait_ms) : (waited += 1000) {
+        var body: std.Io.Writer.Allocating = .init(config.arena);
+
+        if (versions.get(config.io, url, &body.writer)) |_| {
+            return;
+        } else |_| {}
+
+        std.Io.sleep(config.io, .fromSeconds(1), .awake) catch return;
+    }
+}
+
+/// The project's admin signed in once, through the dashboard's sign-on: good for a minute.
+fn admin_link(client: Client, deployed: Deployed) ![]const u8 {
+    const config = client.config;
+    const sent = try std.json.Stringify.valueAlloc(config.arena, .{
+        .project = deployed.slug,
+    }, .{});
+    const quiet: Client = .{
+        .config = config,
+        .dashboard = client.dashboard,
+        .token = client.token,
+    };
+    const answer = try quiet.call("cloud.sign_on_token", sent);
+    const Signed = struct {
+        token: []const u8,
+    };
+    const signed = try quiet.answered(Signed, answer) orelse return error.NotSigned;
+    const at = std.mem.indexOf(u8, deployed.admin, "/admin") orelse deployed.admin.len;
+
+    return std.fmt.allocPrint(config.arena, "{s}/auth/sign-on?token={s}&return=%2Fadmin", .{
+        deployed.admin[0..at],
+        signed.token,
+    });
+}
+
 
 /// This computer signed in to the project as the account that deployed it, through the
 /// dashboard's sign-on, so the folder pulls and pushes with nothing to approve. A refusal
@@ -257,7 +466,9 @@ fn sign_in_folder(init: std.process.Init, client: Client, out: *std.Io.Writer, d
     const signed = try quiet.answered(Signed, answer) orelse return;
     const words = [_][]const u8{ "login", deployed.address, "--sign-on", signed.token };
 
-    if (try core.login.run(init, out, &words) != 0) {
+    const signed_in = core.login.run(init, out, &words) catch 1;
+
+    if (signed_in != 0) {
         std.debug.print("publr deploy: sign in later to pull and push: publr login {s}\n", .{
             deployed.address,
         });
@@ -418,6 +629,7 @@ const Client = struct {
         }) catch Refusal{};
         const why = if (refusal.message.len > 0) refusal.message else refusal.@"error";
 
+        refused_because = why;
         std.debug.print("\npublr deploy: {s} answered {d}: {s}\n", .{
             client.dashboard,
             @intFromEnum(reply.status),
@@ -458,7 +670,7 @@ const Client = struct {
 
     /// The archive sent to the dashboard as it is read, to its sync address; the upload's
     /// name there.
-    fn upload(client: Client, out: *std.Io.Writer, path: []const u8) !?[]const u8 {
+    fn upload(client: Client, out: *std.Io.Writer, path: []const u8, watch: transfer.Watch) !?[]const u8 {
         const arena = client.config.arena;
         const reply = try transfer.send_in_parts(client.config.io, arena, .{
             .url = try std.fmt.allocPrint(arena, "{s}{s}", .{ client.sync_address(), upload_path }),
@@ -467,6 +679,7 @@ const Client = struct {
             .piece_bytes = upload_piece_bytes,
             .out = client.events orelse out,
             .json = client.events != null,
+            .watch = watch,
         });
         const Uploaded = struct {
             upload: []const u8,

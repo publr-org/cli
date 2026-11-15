@@ -1,8 +1,9 @@
-//! A clone seen in the browser while it comes down: a scratch site of the site's release, in
-//! the command's `clones/<name>-cloning`, served on the clone's own port with the clone
-//! progress plugin given to that server alone (`serve --plugin`). The command tells the
-//! plugin where the clone is and reads what the person chose on its page; once the site is in
-//! its folder, the scratch server stops and goes, and the site takes the port.
+//! A site moving, seen in the browser: a scratch site of the site's release, in the
+//! command's `clones/<name>-<doing>`, served with the progress plugin given to that server
+//! alone (`serve --plugin`). A clone serves it on the clone's own port and, once the site is
+//! in its folder, the scratch server goes and the site takes the port; a deploy serves it on
+//! a free port beside the site's own server. The command tells the plugin where the move is
+//! and reads what the person chose on its page and what the page last showed.
 
 const std = @import("std");
 const core = @import("../../core.zig");
@@ -16,11 +17,15 @@ pub const page_path = "/admin/plugin/clone_progress/progress";
 const plugin_main = @embedFile("clone_progress_main");
 const plugin_view = @embedFile("clone_progress_view");
 const plugin_steps = @embedFile("clone_progress_steps");
+/// Each feed is a Publr process talking to the page's server; more often than this, they
+/// queue ahead of the page's own reads. The page's clock ticks between them.
 const feed_every_ms: i64 = 250;
 const choice_poll_ms: u32 = 300;
 
 /// What the page shows: the plugin's record, field for field.
 pub const Progress = struct {
+    /// `down` (a clone) or `up` (a deploy).
+    direction: []const u8 = "down",
     name: []const u8 = "",
     folder: []const u8 = "",
     phase: []const u8 = "packing",
@@ -37,6 +42,9 @@ pub const Progress = struct {
     plugins_bytes: u64 = 0,
     problem: []const u8 = "",
     elapsed_ms: u64 = 0,
+    /// Up, once done: where it is live, and its admin signed in once.
+    address: []const u8 = "",
+    admin: []const u8 = "",
 };
 
 pub const Arriving = struct {
@@ -48,7 +56,8 @@ pub const Arriving = struct {
     began_ms: i64,
     fed_ms: i64 = 0,
 
-    /// The scratch site made and served on `port`, its admin the account that clones.
+    /// The scratch site made and served on `port`, its admin `email` (the account that
+    /// clones); `doing` names its folder (`cloning`, `deploying`).
     pub fn open(
         arriving: *Arriving,
         config: *const Config,
@@ -56,12 +65,13 @@ pub const Arriving = struct {
         release: []const u8,
         email: []const u8,
         port: u16,
+        doing: []const u8,
         progress: Progress,
     ) !void {
         std.debug.assert(port > 0);
         std.debug.assert(email.len > 0);
 
-        const name = try std.fmt.allocPrint(config.arena, "{s}-cloning", .{progress.name});
+        const name = try std.fmt.allocPrint(config.arena, "{s}-{s}", .{ progress.name, doing });
         const folder = try config.path(&.{ core.sites.clones_folder, name });
         const cwd = std.Io.Dir.cwd();
 
@@ -139,6 +149,9 @@ pub const Arriving = struct {
         }.of;
         const answer = core.project.run(config, arriving.publr, arriving.site.folder, &.{
             "--as-admin",                 "clone_progress.update",
+            "--direction",                progress.direction,
+            "--address",                  progress.address,
+            "--admin",                    progress.admin,
             "--name",                     progress.name,
             "--folder",                   progress.folder,
             "--phase",                    progress.phase,
@@ -167,6 +180,20 @@ pub const Arriving = struct {
         }) catch return "";
 
         return parsed.chosen;
+    }
+
+    /// The page told where the move ended, then `linger_ms` for an open page to show it
+    /// (it asks every few hundred milliseconds) before the server goes.
+    pub fn finish(arriving: *Arriving, linger_ms: u32) void {
+        _ = arriving.feed(true) catch "";
+
+        if (linger_ms > 0) {
+            std.Io.sleep(arriving.config.io, .fromMilliseconds(linger_ms), .awake) catch {
+                std.log.debug("progress: the page was not given its moment", .{});
+            };
+        }
+
+        arriving.close();
     }
 
     /// What the person chose on the page: true for everything, false for no media files.
@@ -200,15 +227,28 @@ pub const Arriving = struct {
     }
 };
 
+/// The plugin's source the command carries, as one number.
+fn source_hash() u64 {
+    var hasher = std.hash.Wyhash.init(0);
+
+    hasher.update(plugin_main);
+    hasher.update(plugin_view);
+    hasher.update(plugin_steps);
+
+    return hasher.final();
+}
+
 /// The plugin built for `publr`'s release from the source the command carries, kept beside
 /// that release (`versions/<v>/clone_progress.wasm`); built for every clone when a Publr of
 /// one's own runs instead.
 fn module_of(config: *const Config, publr: []const u8, release: []const u8, site: []const u8) ![]const u8 {
     const own = versions.chosen_for_all(config) != null;
+    // Named after its source, so a command carrying a changed plugin builds it again.
+    const built_name = try std.fmt.allocPrint(config.arena, "{s}-{x}.wasm", .{ plugin_name, source_hash() });
     const kept = if (own)
-        try config.path(&.{ core.sites.clones_folder, plugin_name ++ ".wasm" })
+        try config.path(&.{ core.sites.clones_folder, built_name })
     else
-        try config.path(&.{ versions.folder_name, release, plugin_name ++ ".wasm" });
+        try config.path(&.{ versions.folder_name, release, built_name });
     const cwd = std.Io.Dir.cwd();
 
     if (!own) {
