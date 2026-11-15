@@ -141,7 +141,8 @@ fn send_part(
     path: []const u8,
 ) !?[]const u8 {
     const arena = config.arena;
-    const reply = try transfer.send(config.io, arena, .{
+    const reply = try transfer.send_in_parts(config.io, arena, .{
+        .parts = .offset,
         .url = try std.fmt.allocPrint(arena, "{s}{s}?name={s}&part={s}", .{
             linked.sync.address,
             push_route,

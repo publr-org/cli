@@ -324,17 +324,24 @@ pub const Upload = struct {
     /// One JSON line per report instead (`{"stage":"uploading","done":…,"total":…}`), for a
     /// program driving the command.
     json: bool = false,
+    /// How later parts name the upload (`send_in_parts`).
+    parts: Parts = .named,
 };
+
+/// How a part says which upload it adds to. `named`: the first part's answer names it
+/// (`?upload=<name>&offset=<bytes>`, Publr Cloud's bundles). `offset`: the URL names it
+/// already, each part says where it starts (`&offset=<bytes>`) and whether more follow
+/// (`&more=1`), as a push does.
+pub const Parts = enum { named, offset };
 
 /// An upload sent in parts of at most this, each its own request: the proxy in front of
 /// Publr Cloud refuses a request over 100 MB.
 pub const part_bytes_max: u64 = 32 << 20;
 const part_attempts: u32 = 5;
 
-/// The file at `path` sent to a dashboard's `/api/cloud/bundles` in parts: the first
-/// begins the upload, each later one adds `?upload=<name>&offset=<bytes>`; a refused offset
-/// (409) or a lost connection goes on from the bytes the dashboard has. The last answer,
-/// `{ upload, bytes }`, or the first refusal.
+/// The file at `path` sent in parts (`upload.parts` says how each names its place): a
+/// refused offset (409) or a lost connection goes on from the bytes the server has. The last
+/// part's answer, or the first refusal.
 pub fn send_in_parts(io: std.Io, arena: std.mem.Allocator, upload: Upload) !Reply {
     std.debug.assert(upload.url.len > 0);
     std.debug.assert(upload.piece_bytes > 0);
@@ -353,12 +360,21 @@ pub fn send_in_parts(io: std.Io, arena: std.mem.Allocator, upload: Upload) !Repl
         .body = "",
     };
 
-    while (offset < size or name.len == 0) {
-        const url = if (name.len == 0)
+    const named = upload.parts == .named;
+
+    while (offset < size or (named and name.len == 0)) {
+        const length = @min(size - offset, part_bytes_max);
+        const last_part = offset + length == size;
+        const url = if (!named)
+            try std.fmt.allocPrint(arena, "{s}&offset={d}{s}", .{
+                upload.url,
+                offset,
+                if (last_part) "" else "&more=1",
+            })
+        else if (name.len == 0)
             upload.url
         else
             try std.fmt.allocPrint(arena, "{s}?upload={s}&offset={d}", .{ upload.url, name, offset });
-        const length = @min(size - offset, part_bytes_max);
 
         try reader.seekTo(offset);
 
@@ -366,7 +382,7 @@ pub fn send_in_parts(io: std.Io, arena: std.mem.Allocator, upload: Upload) !Repl
         const reply = sent catch |err| {
             failures += 1;
 
-            if (failures == part_attempts or name.len == 0) {
+            if (failures == part_attempts or (named and name.len == 0)) {
                 return err;
             }
 
@@ -386,6 +402,11 @@ pub fn send_in_parts(io: std.Io, arena: std.mem.Allocator, upload: Upload) !Repl
 
         switch (reply.status) {
             .created, .ok => {
+                // The last part done: its answer is the upload's.
+                if (!named and last_part) {
+                    break;
+                }
+
                 if (answer.upload.len > 0) {
                     name = answer.upload;
                 }
@@ -410,7 +431,7 @@ pub fn send_in_parts(io: std.Io, arena: std.mem.Allocator, upload: Upload) !Repl
             else => return reply,
         }
 
-        if (name.len == 0 or offset > size) {
+        if ((named and name.len == 0) or offset > size) {
             return reply;
         }
     }
