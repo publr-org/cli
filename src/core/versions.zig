@@ -158,19 +158,21 @@ pub fn running_label(config: *const Config, site: Site) ![]const u8 {
     return (try pin_of(config, site.folder)) orelse "none";
 }
 
-/// The Publr `site` runs: the one chosen for every site, else its pinned release, fetched
-/// when missing.
+/// The Publr `site` runs: the one chosen for every site, else its pinned release (the newest,
+/// pinned now, when it names none), fetched when missing.
 pub fn binary_for(config: *const Config, site: Site) ![]const u8 {
     if (chosen_binary(config, site)) |path| {
         return path;
     }
 
-    const pin = (try pin_of(config, site.folder)) orelse {
-        std.debug.print("publr: {s} pins no Publr: `publr versions use <version> {s}`\n", .{
-            site.name,
-            site.name,
-        });
-        return error.NoPin;
+    // A site that names no release takes the newest, as a new one would, and keeps it.
+    const pin = (try pin_of(config, site.folder)) orelse blk: {
+        const newest_release = try newest(config);
+
+        try set_pin(config, site.folder, newest_release);
+        std.debug.print("publr: {s} now runs Publr {s}\n", .{ site.name, newest_release });
+
+        break :blk newest_release;
     };
 
     return kept(config, pin);
