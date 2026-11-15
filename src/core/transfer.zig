@@ -292,7 +292,190 @@ pub const Upload = struct {
     piece_bytes: u32,
     /// Where the progress goes: `Uploading... 40%`.
     out: *std.Io.Writer,
+    /// One JSON line per report instead (`{"stage":"uploading","done":…,"total":…}`), for a
+    /// program driving the command.
+    json: bool = false,
 };
+
+/// An upload sent in parts of at most this, each its own request: the proxy in front of
+/// Publr Cloud refuses a request over 100 MB.
+pub const part_bytes_max: u64 = 32 << 20;
+const part_attempts: u32 = 5;
+
+/// The file at `path` sent to a dashboard's `/api/cloud/bundles` in parts: the first
+/// begins the upload, each later one adds `?upload=<name>&offset=<bytes>`; a refused offset
+/// (409) or a lost connection goes on from the bytes the dashboard has. The last answer,
+/// `{ upload, bytes }`, or the first refusal.
+pub fn send_in_parts(io: std.Io, arena: std.mem.Allocator, upload: Upload) !Reply {
+    std.debug.assert(upload.url.len > 0);
+    std.debug.assert(upload.piece_bytes > 0);
+
+    var file = try std.Io.Dir.cwd().openFile(io, upload.path, .{});
+    defer file.close(io);
+
+    var file_buffer: [64 << 10]u8 = undefined;
+    var reader = file.reader(io, &file_buffer);
+    const size = try reader.getSize();
+    var name: []const u8 = "";
+    var offset: u64 = 0;
+    var failures: u32 = 0;
+    var last: Reply = .{
+        .status = .bad_request,
+        .body = "",
+    };
+
+    while (offset < size or name.len == 0) {
+        const url = if (name.len == 0)
+            upload.url
+        else
+            try std.fmt.allocPrint(arena, "{s}?upload={s}&offset={d}", .{ upload.url, name, offset });
+        const length = @min(size - offset, part_bytes_max);
+
+        try reader.seekTo(offset);
+
+        const sent = post_part(io, arena, upload, url, &reader.interface, offset, length, size);
+        const reply = sent catch |err| {
+            failures += 1;
+
+            if (failures == part_attempts or name.len == 0) {
+                return err;
+            }
+
+            continue;
+        };
+
+        last = reply;
+
+        const Part = struct {
+            upload: []const u8 = "",
+            bytes: u64 = 0,
+        };
+        const answer = std.json.parseFromSliceLeaky(Part, arena, reply.body, .{
+            .ignore_unknown_fields = true,
+            .allocate = .alloc_always,
+        }) catch Part{};
+
+        switch (reply.status) {
+            .created, .ok => {
+                if (answer.upload.len > 0) {
+                    name = answer.upload;
+                }
+
+                // A part taken and nothing added: the dashboard is not following along.
+                if (answer.bytes <= offset and offset < size) {
+                    return reply;
+                }
+
+                offset = answer.bytes;
+            },
+            // What the dashboard has is where the next part starts.
+            .conflict => {
+                failures += 1;
+
+                if (failures == part_attempts) {
+                    return reply;
+                }
+
+                offset = answer.bytes;
+            },
+            else => return reply,
+        }
+
+        if (name.len == 0 or offset > size) {
+            return reply;
+        }
+    }
+
+    if (!upload.json) {
+        try upload.out.print("\n", .{});
+        try upload.out.flush();
+    }
+
+    return last;
+}
+
+/// One part: `length` bytes from `reader` posted to `url`, its progress reported as part of
+/// the whole upload; the answer.
+fn post_part(
+    io: std.Io,
+    arena: std.mem.Allocator,
+    upload: Upload,
+    url: []const u8,
+    reader: *std.Io.Reader,
+    offset: u64,
+    length: u64,
+    size: u64,
+) !Reply {
+    std.debug.assert(offset + length <= size);
+
+    var client: std.http.Client = .{
+        .allocator = arena,
+        .io = io,
+    };
+    defer client.deinit();
+
+    const bearer = try std.fmt.allocPrint(arena, "Bearer {s}", .{upload.token});
+    var request = try client.request(.POST, try std.Uri.parse(url), .{
+        .keep_alive = false,
+        .redirect_behavior = .unhandled,
+        .headers = .{
+            .content_type = .{
+                .override = "application/gzip",
+            },
+        },
+        .extra_headers = &.{.{
+            .name = "Authorization",
+            .value = bearer,
+        }},
+    });
+    defer request.deinit();
+
+    request.transfer_encoding = .{
+        .content_length = length,
+    };
+
+    var body_buffer: [64 << 10]u8 = undefined;
+    var body = try request.sendBodyUnflushed(&body_buffer);
+    var sent: u64 = 0;
+
+    while (sent < length) {
+        const piece = @min(length - sent, upload.piece_bytes);
+
+        try reader.streamExact64(&body.writer, piece);
+        sent += piece;
+        try report(upload, offset + sent, size);
+    }
+
+    try body.end();
+    try request.connection.?.flush();
+
+    var response = try request.receiveHead(&.{});
+    const status = response.head.status;
+    var transfer: [64]u8 = undefined;
+    const response_reader = response.reader(&transfer);
+    const remaining = response_reader.allocRemaining(arena, .limited(answer_bytes_max));
+    const answer = remaining catch |err| switch (err) {
+        error.ReadFailed => return response.bodyErr().?,
+        else => return err,
+    };
+
+    return .{
+        .status = status,
+        .body = answer,
+    };
+}
+
+fn report(upload: Upload, done: u64, size: u64) !void {
+    std.debug.assert(done <= size);
+
+    if (upload.json) {
+        try upload.out.print("{{\"stage\":\"uploading\",\"done\":{d},\"total\":{d}}}\n", .{ done, size });
+    } else {
+        try upload.out.print("\rUploading... {d}%", .{done * 100 / @max(size, 1)});
+    }
+
+    try upload.out.flush();
+}
 
 pub const Reply = struct {
     status: std.http.Status,

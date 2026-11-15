@@ -25,6 +25,7 @@ const spaces_max: u32 = 64;
 
 pub const usage =
     \\usage: publr deploy [--space <space>] [--slug <address>] [--name <name>] [--cloud <dashboard>]
+    \\                    [--progress json]
     \\
 ;
 
@@ -33,6 +34,11 @@ const Options = struct {
     slug: []const u8 = "",
     name: []const u8 = "",
     dashboard: []const u8 = "",
+    /// One JSON line per step on stdout instead of the words, for a program driving it
+    /// (Publr Studio): `{"stage":"packing"}`, `{"stage":"uploading","done":…,"total":…}`,
+    /// `{"stage":"starting"}`, `{"stage":"done","address":…,"admin":…,…}`, or
+    /// `{"stage":"failed","error":…,"message":…}`.
+    json: bool = false,
 };
 
 const Deployed = struct {
@@ -60,6 +66,8 @@ fn parse(args: []const []const u8) ?Options {
             options.name = value;
         } else if (std.mem.eql(u8, flag, "--cloud")) {
             options.dashboard = std.mem.trimEnd(u8, value, "/");
+        } else if (std.mem.eql(u8, flag, "--progress") and std.mem.eql(u8, value, "json")) {
+            options.json = true;
         } else {
             return null;
         }
@@ -71,13 +79,17 @@ fn parse(args: []const []const u8) ?Options {
 pub fn run(
     init: std.process.Init,
     config: *const Config,
-    out: *std.Io.Writer,
+    events: *std.Io.Writer,
     rest: []const []const u8,
 ) !u8 {
     var options = parse(rest) orelse {
         std.debug.print("{s}", .{usage});
         return 2;
     };
+    // With `--progress json` the words go nowhere and the events to stdout.
+    var quiet_buffer: [256]u8 = undefined;
+    var quiet: std.Io.Writer.Discarding = .init(&quiet_buffer);
+    const out = if (options.json) &quiet.writer else events;
 
     if (options.dashboard.len == 0) {
         const given = init.environ_map.get(cloud_login.dashboard_variable) orelse
@@ -116,6 +128,7 @@ pub fn run(
         .config = config,
         .dashboard = options.dashboard,
         .token = token,
+        .events = if (options.json) events else null,
     };
 
     if (options.space.len == 0) {
@@ -168,6 +181,9 @@ fn deploy(
         };
     }
 
+    try client.event(.{
+        .stage = "packing",
+    });
     try progress(out, "Packing the site", .{});
     try site_data.export_to(config, publr, folder, exported, .{});
 
@@ -177,6 +193,9 @@ fn deploy(
 
     const upload = try client.upload(out, file) orelse return 1;
 
+    try client.event(.{
+        .stage = "starting",
+    });
     try progress(out, "Starting it on Cloud", .{});
 
     const sent = try std.json.Stringify.valueAlloc(arena, .{
@@ -197,6 +216,14 @@ fn deploy(
         .address = deployed.address,
         .admin = deployed.admin,
         .deployed_at_ms = core.server.now_ms(config.io),
+    });
+    try client.event(.{
+        .stage = "done",
+        .address = deployed.address,
+        .admin = deployed.admin,
+        .project = deployed.id,
+        .project_id = deployed.project_id,
+        .slug = deployed.slug,
     });
     try out.print("done\n{s} is live at {s}\nAdmin: {s}\n" ++
         "This folder is linked to it ({s}).\n", .{
@@ -221,7 +248,13 @@ fn sign_in_folder(init: std.process.Init, client: Client, out: *std.Io.Writer, d
     const Signed = struct {
         token: []const u8,
     };
-    const signed = try client.answered(Signed, answer) orelse return;
+    // The project is made either way: a refusal here is no failure of the deploy.
+    const quiet: Client = .{
+        .config = client.config,
+        .dashboard = client.dashboard,
+        .token = client.token,
+    };
+    const signed = try quiet.answered(Signed, answer) orelse return;
     const words = [_][]const u8{ "login", deployed.address, "--sign-on", signed.token };
 
     if (try core.login.run(init, out, &words) != 0) {
@@ -338,6 +371,17 @@ const Client = struct {
     config: *const Config,
     dashboard: []const u8,
     token: []const u8,
+    /// Where `--progress json` events go; null without it.
+    events: ?*std.Io.Writer = null,
+
+    /// One JSON event line, with `--progress json`.
+    fn event(client: Client, value: anytype) !void {
+        const writer = client.events orelse return;
+
+        try std.json.Stringify.value(value, .{}, writer);
+        try writer.writeAll("\n");
+        try writer.flush();
+    }
 
     /// `POST /api/<plugin>.<verb>` with a JSON body.
     fn call(client: Client, operation: []const u8, payload: []const u8) !transfer.Reply {
@@ -379,6 +423,11 @@ const Client = struct {
             @intFromEnum(reply.status),
             why,
         });
+        try client.event(.{
+            .stage = "failed",
+            .@"error" = refusal.@"error",
+            .message = why,
+        });
 
         return null;
     }
@@ -386,12 +435,13 @@ const Client = struct {
     /// The archive sent to the dashboard as it is read; the upload's name there.
     fn upload(client: Client, out: *std.Io.Writer, path: []const u8) !?[]const u8 {
         const arena = client.config.arena;
-        const reply = try transfer.send(client.config.io, arena, .{
+        const reply = try transfer.send_in_parts(client.config.io, arena, .{
             .url = try std.fmt.allocPrint(arena, "{s}{s}", .{ client.dashboard, upload_path }),
             .token = client.token,
             .path = path,
             .piece_bytes = upload_piece_bytes,
-            .out = out,
+            .out = client.events orelse out,
+            .json = client.events != null,
         });
         const Uploaded = struct {
             upload: []const u8,
