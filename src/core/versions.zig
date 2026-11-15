@@ -375,10 +375,38 @@ pub fn sum_of(sums: []const u8, file: []const u8) ?[]const u8 {
 }
 
 const request_head_bytes_max = 16 * 1024;
+/// GitHub sends a release asset on to a signed address on another host.
+const redirects_max: u32 = 4;
 
+/// `url`'s body into `out`. Redirects are followed here, each as a request of its own: Zig's
+/// client, following them itself, sends the next request damaged ("invalid header name" from
+/// GitHub's asset host) and cuts long bodies short.
 pub fn get(io: std.Io, url: []const u8, out: *std.Io.Writer) !void {
     std.debug.assert(url.len > 0);
     std.debug.assert(url.len < request_head_bytes_max);
+
+    var location_buffer: [request_head_bytes_max]u8 = undefined;
+    var next: []const u8 = url;
+    var hops: u32 = 0;
+
+    while (hops <= redirects_max) : (hops += 1) {
+        const moved = try get_once(io, next, out, &location_buffer) orelse return;
+
+        if (!std.mem.startsWith(u8, moved, "https://")) {
+            return error.NotFound;
+        }
+
+        next = moved;
+    }
+
+    return error.NotFound;
+}
+
+/// One request: its body into `out` when it answers, or the address it moved to, copied into
+/// `location_buffer`.
+fn get_once(io: std.Io, url: []const u8, out: *std.Io.Writer, location_buffer: []u8) !?[]const u8 {
+    std.debug.assert(url.len > 0);
+    std.debug.assert(location_buffer.len >= request_head_bytes_max);
 
     // Its own memory: TLS loads the system's certificates, more than a request holds.
     var client_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -386,34 +414,55 @@ pub fn get(io: std.Io, url: []const u8, out: *std.Io.Writer) !void {
     var client: std.http.Client = .{
         .allocator = client_arena.allocator(),
         .io = io,
-        // A whole request head in one buffer: with the default 1 KiB, a head that runs past
-        // it (a release asset's signed address is ~900 bytes) reaches the server damaged.
+        // A whole request head in one buffer: a release asset's signed address is ~900 bytes.
         .write_buffer_size = request_head_bytes_max,
     };
     defer client.deinit();
 
-    const result = try client.fetch(.{
-        .location = .{
-            .url = url,
-        },
-        .method = .GET,
+    var request = try client.request(.GET, try std.Uri.parse(url), .{
         .keep_alive = false,
-        .extra_headers = &.{
-            .{
-                .name = "User-Agent",
-                .value = "publr-cli",
+        .redirect_behavior = .unhandled,
+        .headers = .{
+            .user_agent = .{
+                .override = "publr-cli",
             },
+            .accept_encoding = .omit,
+        },
+        .extra_headers = &.{
             .{
                 .name = "Accept",
                 .value = "application/vnd.github+json",
             },
         },
-        .response_writer = out,
     });
+    defer request.deinit();
 
-    if (result.status != .ok) {
+    try request.sendBodiless();
+
+    var response = try request.receiveHead(&.{});
+
+    if (response.head.status.class() == .redirect) {
+        const location = response.head.location orelse return error.NotFound;
+
+        if (location.len > location_buffer.len) {
+            return error.NotFound;
+        }
+
+        @memcpy(location_buffer[0..location.len], location);
+
+        return location_buffer[0..location.len];
+    }
+
+    if (response.head.status != .ok) {
         return error.NotFound;
     }
+
+    _ = response.reader(&.{}).streamRemaining(out) catch |err| switch (err) {
+        error.ReadFailed => return response.bodyErr().?,
+        else => |other| return other,
+    };
+
+    return null;
 }
 
 pub fn succeeded(term: std.process.Child.Term) bool {
