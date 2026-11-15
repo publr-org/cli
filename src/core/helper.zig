@@ -17,8 +17,8 @@ pub const log_name = "helper.log";
 pub const about = "publr-cli helper\n";
 const request_bytes_max: u32 = 8192;
 
-/// Running, or started now with `self_path helper`. Refused while another program (`p`'s
-/// helper) holds the port.
+/// Running, or started now with `self_path helper`. Refused while another program holds the
+/// port.
 pub fn ensure(config: *const Config, self_path: []const u8) !void {
     std.debug.assert(self_path.len > 0);
 
@@ -27,8 +27,8 @@ pub fn ensure(config: *const Config, self_path: []const u8) !void {
             return;
         }
 
-        std.debug.print("publr: another program holds 127.0.0.1:{d} (`p helper`?); " ++
-            "stop it so signed-in links work: pkill -f 'p helper'\n", .{sign_on.helper_port});
+        std.debug.print("publr: another program holds 127.0.0.1:{d}; " ++
+            "signed-in links need it free\n", .{sign_on.helper_port});
         return;
     }
 

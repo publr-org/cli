@@ -134,10 +134,6 @@ fn run(init: std.process.Init) !u8 {
     const args = try init.minimal.args.toSlice(arena);
     var config = try Config.load(init.io, arena, init.environ_map);
 
-    if (config.fresh) {
-        try core.migrate.from_p(&config);
-    }
-
     var words: []const []const u8 = args[1..];
     const globals = try take_globals(&words);
 

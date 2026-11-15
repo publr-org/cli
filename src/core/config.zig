@@ -23,8 +23,6 @@ pub const Config = struct {
     folders: []const []const u8,
     /// The Publr workspace (the folder with `workspace.zon`), for `versions use workspace`.
     workspace: []const u8,
-    /// No `config.zon` was there: the command's first run on this computer.
-    fresh: bool = false,
 
     /// Read, or made with the defaults the first time. Everything it holds is in `arena`.
     pub fn load(
@@ -55,10 +53,7 @@ pub const Config = struct {
             .of(u8),
             0,
         ) catch |err| switch (err) {
-            error.FileNotFound => {
-                config.fresh = true;
-                return config;
-            },
+            error.FileNotFound => return config,
             else => return err,
         };
         const File = struct {

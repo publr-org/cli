@@ -9,7 +9,6 @@ pub const sign_on = @import("core/sign_on.zig");
 pub const helper = @import("core/helper.zig");
 pub const versions = @import("core/versions.zig");
 pub const project = @import("core/project.zig");
-pub const migrate = @import("core/migrate.zig");
 pub const credentials = @import("core/credentials.zig");
 pub const remote = @import("core/remote.zig");
 pub const login = @import("core/login.zig");
