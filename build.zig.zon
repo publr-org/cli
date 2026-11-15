@@ -2,7 +2,7 @@
     .name = .publr_cli,
     .version = "0.1.0",
     .fingerprint = 0x36cefe17303bd63f,
-    .minimum_zig_version = "0.16.0",
+    .minimum_zig_version = "0.17.0",
     .dependencies = .{
         // The Zig compiler `plugin build` and `zig` run (wasm32 only, no LLVM).
         .publr_zig = .{

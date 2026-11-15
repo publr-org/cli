@@ -28,7 +28,7 @@ every local site trusts, the helper's log. Each site keeps what this computer kn
 
 ## Building
 
-`zig build` (Zig 0.16.0) puts the command in `zig-out/bin/publr`; `zig build test` runs the
+`zig build` (Zig 0.17.0) puts the command in `zig-out/bin/publr`; `zig build test` runs the
 tests and the options rule of Publr's tidy (it reads `../publr/scripts/tidy.zig`). Studio
 links the core as the `publr_cli` module, which carries no compiler.
 

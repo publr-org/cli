@@ -92,7 +92,7 @@ pub fn release_of(io: std.Io, arena: std.mem.Allocator, site: credentials.Site) 
     if (answer.status != .ok) {
         std.debug.print("publr: {s} answered {d} when asked its release\n", .{
             site.address,
-            @intFromEnum(answer.status),
+            @backingInt(answer.status),
         });
         return null;
     }
@@ -145,7 +145,7 @@ pub fn size_text(io: std.Io, arena: std.mem.Allocator, site: credentials.Site) !
     if (answer.status != .ok) {
         std.debug.print("publr: {s} answered {d} when asked its size\n", .{
             site.address,
-            @intFromEnum(answer.status),
+            @backingInt(answer.status),
         });
         return null;
     }
@@ -198,7 +198,7 @@ pub fn prepared(
         } else {
             std.debug.print("publr: {s} answered {d} when asked to pack itself\n", .{
                 site.address,
-                @intFromEnum(reply.status),
+                @backingInt(reply.status),
             });
         }
 

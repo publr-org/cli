@@ -350,7 +350,7 @@ fn call(local: *Local, init: std.process.Init, asked: Asked) !void {
     if (reply.status != .ok) {
         const text = try std.fmt.allocPrint(arena, "{s} answered {d}", .{
             site.address,
-            @intFromEnum(reply.status),
+            @backingInt(reply.status),
         });
 
         return text_result(local.out, asked.id, text, true);

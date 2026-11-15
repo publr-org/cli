@@ -158,7 +158,7 @@ fn send_part(
     if (reply.status != .ok and reply.status != .created) {
         std.debug.print("publr push: {s} answered {d}: {s}\n", .{
             linked.site.address,
-            @intFromEnum(reply.status),
+            @backingInt(reply.status),
             reply.body,
         });
         return null;

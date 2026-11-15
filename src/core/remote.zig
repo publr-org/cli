@@ -150,7 +150,7 @@ fn send(
     }
 
     if (reply.status != .ok) {
-        std.debug.print("publr: {s} answered {d}\n", .{ target, @intFromEnum(reply.status) });
+        std.debug.print("publr: {s} answered {d}\n", .{ target, @backingInt(reply.status) });
         return null;
     }
 

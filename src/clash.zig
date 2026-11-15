@@ -41,8 +41,7 @@ fn contains(list: []const []const u8, word: []const u8) bool {
 pub fn clashes(buffer: [][]const u8) []const []const u8 {
     var count: usize = 0;
 
-    inline for (@typeInfo(main.Command).@"enum".fields) |field| {
-        const word = field.name;
+    inline for (@typeInfo(main.Command).@"enum".field_names) |word| {
         const flag = word[0] == '-';
 
         if (!flag and contains(&publr_words, word)) {

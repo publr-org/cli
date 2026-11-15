@@ -63,7 +63,12 @@ pub const Config = struct {
             folders: []const []const u8 = &.{},
             publr: []const u8 = "",
         };
-        const file = std.zon.parse.fromSliceAlloc(File, arena, text, null, .{
+        var diagnostics: std.zon.parse.Diagnostics = undefined;
+        const file = std.zon.parse.fromSlice(File, .{
+            .gpa = arena,
+            .arena = arena,
+            .source = text,
+            .diagnostics = &diagnostics,
             .ignore_unknown_fields = true,
         }) catch {
             std.debug.print("publr: {s} is not readable; fix or remove it\n", .{file_path});

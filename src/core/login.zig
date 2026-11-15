@@ -308,7 +308,7 @@ fn logout(init: std.process.Init, out: *std.Io.Writer, address: ?[]const u8) !u8
 
     if (remote.post(init.io, arena, revoke)) |reply| {
         if (reply.status != .ok) {
-            const status = @intFromEnum(reply.status);
+            const status = @backingInt(reply.status);
 
             std.debug.print("publr: {s} answered {d}\n", .{ site.address, status });
         }
@@ -375,7 +375,7 @@ pub fn call(
     if (reply.status != .ok) {
         std.debug.print("publr: {s} answered {d}: {s}\n", .{
             address,
-            @intFromEnum(reply.status),
+            @backingInt(reply.status),
             reply.body,
         });
         return error.Refused;

@@ -110,8 +110,8 @@ pub const Arriving = struct {
         const key = try core.sign_on.public_key_hex(config);
 
         _ = try core.project.run(config, publr, folder, &.{
-            "--as-admin", "sign_on",   "configure",       "--issuer", core.sign_on.issuer,
-            "--public_key", &key, "--audience", name,
+            "--as-admin",   "sign_on", "configure",  "--issuer", core.sign_on.issuer,
+            "--public_key", &key,      "--audience", name,
         });
         _ = try arriving.feed(true);
     }
@@ -148,26 +148,26 @@ pub const Arriving = struct {
             }
         }.of;
         const answer = core.project.run(config, arriving.publr, arriving.site.folder, &.{
-            "--as-admin",                 "clone_progress.update",
-            "--direction",                progress.direction,
-            "--address",                  progress.address,
-            "--admin",                    progress.admin,
-            "--name",                     progress.name,
-            "--folder",                   progress.folder,
-            "--phase",                    progress.phase,
-            "--packed_through",           try number(arena, progress.packed_through),
-            "--done_bytes",               try number(arena, progress.done_bytes),
-            "--total_bytes",              try number(arena, progress.total_bytes),
-            "--placeholders",             try number(arena, progress.placeholders),
-            "--unpacked_bytes",           try number(arena, progress.unpacked_bytes),
-            "--media",                    if (progress.media) "true" else "false",
-            "--database_bytes",           try number(arena, progress.database_bytes),
-            "--media_files",              try number(arena, progress.media_files),
-            "--media_bytes",              try number(arena, progress.media_bytes),
-            "--apps_bytes",               try number(arena, progress.apps_bytes),
-            "--plugins_bytes",            try number(arena, progress.plugins_bytes),
-            "--problem",                  progress.problem,
-            "--elapsed_ms",               try number(arena, progress.elapsed_ms),
+            "--as-admin",       "clone_progress.update",
+            "--direction",      progress.direction,
+            "--address",        progress.address,
+            "--admin",          progress.admin,
+            "--name",           progress.name,
+            "--folder",         progress.folder,
+            "--phase",          progress.phase,
+            "--packed_through", try number(arena, progress.packed_through),
+            "--done_bytes",     try number(arena, progress.done_bytes),
+            "--total_bytes",    try number(arena, progress.total_bytes),
+            "--placeholders",   try number(arena, progress.placeholders),
+            "--unpacked_bytes", try number(arena, progress.unpacked_bytes),
+            "--media",          if (progress.media) "true" else "false",
+            "--database_bytes", try number(arena, progress.database_bytes),
+            "--media_files",    try number(arena, progress.media_files),
+            "--media_bytes",    try number(arena, progress.media_bytes),
+            "--apps_bytes",     try number(arena, progress.apps_bytes),
+            "--plugins_bytes",  try number(arena, progress.plugins_bytes),
+            "--problem",        progress.problem,
+            "--elapsed_ms",     try number(arena, progress.elapsed_ms),
         }) catch |err| {
             std.log.warn("clone progress: {t}", .{err});
             return "";

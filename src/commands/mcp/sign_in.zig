@@ -184,7 +184,7 @@ fn tool_name(client: []const u8) []const u8 {
     };
 
     for (known) |pair| {
-        if (std.ascii.indexOfIgnoreCase(client, pair[0]) != null) {
+        if (std.ascii.findIgnoreCase(client, pair[0]) != null) {
             return pair[1];
         }
     }

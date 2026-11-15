@@ -48,7 +48,12 @@ pub fn pin_of(config: *const Config, folder: []const u8) !?[]const u8 {
     const Project = struct {
         publr: ?[]const u8 = null,
     };
-    const project = std.zon.parse.fromSliceAlloc(Project, config.arena, text, null, .{
+    var diagnostics: std.zon.parse.Diagnostics = undefined;
+    const project = std.zon.parse.fromSlice(Project, .{
+        .gpa = config.arena,
+        .arena = config.arena,
+        .source = text,
+        .diagnostics = &diagnostics,
         .ignore_unknown_fields = true,
     }) catch return error.BadProjectFile;
 
@@ -432,8 +437,8 @@ test "a pin set in publr.zon, added or replaced" {
 }
 
 test "a release's checksum found by file name" {
-    const sums = "aa" ** 32 ++ "  publr-linux-x86_64\n" ++ "bb" ** 32 ++ " *publr-macos-aarch64\n";
+    const sums = &@as([64]u8, @splat('a')) ++ "  publr-linux-x86_64\n" ++ &@as([64]u8, @splat('b')) ++ " *publr-macos-aarch64\n";
 
-    try std.testing.expectEqualStrings("bb" ** 32, sum_of(sums, "publr-macos-aarch64").?);
+    try std.testing.expectEqualStrings(&@as([64]u8, @splat('b')), sum_of(sums, "publr-macos-aarch64").?);
     try std.testing.expect(sum_of(sums, "publr-linux-aarch64") == null);
 }

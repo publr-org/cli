@@ -445,7 +445,6 @@ fn admin_link(client: Client, deployed: Deployed) ![]const u8 {
     });
 }
 
-
 /// This computer signed in to the project as the account that deployed it, through the
 /// dashboard's sign-on, so the folder pulls and pushes with nothing to approve. A refusal
 /// only means signing in later with `publr login`.
@@ -632,7 +631,7 @@ const Client = struct {
         refused_because = why;
         std.debug.print("\npublr deploy: {s} answered {d}: {s}\n", .{
             client.dashboard,
-            @intFromEnum(reply.status),
+            @backingInt(reply.status),
             why,
         });
         try client.event(.{
@@ -700,5 +699,5 @@ test "an address from the folder's name, never taken" {
 
     try std.testing.expectEqualStrings("my-shop-abc019", try slug_with(arena, "My Shop!", &random));
     try std.testing.expectEqualStrings("site-abc019", try slug_with(arena, "...", &random));
-    try std.testing.expectEqual(@as(usize, 63), (try slug_with(arena, "x" ** 100, &random)).len);
+    try std.testing.expectEqual(@as(usize, 63), (try slug_with(arena, &@as([100]u8, @splat('x')), &random)).len);
 }

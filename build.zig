@@ -44,9 +44,7 @@ pub fn build(builder: *std.Build) void {
 
     const run = builder.addRunArtifact(exe);
 
-    if (builder.args) |args| {
-        run.addArgs(args);
-    }
+    run.addPassthruArgs();
 
     builder.step("run", "Run publr").dependOn(&run.step);
 
@@ -72,7 +70,7 @@ fn add_compiler(
     builder: *std.Build,
     module: *std.Build.Module,
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.builtin.Optimize,
 ) void {
     const given = builder.option(
         []const u8,
@@ -80,7 +78,7 @@ fn add_compiler(
         "The compiler's archive, built before for this target by `zig build toolchain` in " ++
             "../lib/zig, used instead of building it",
     );
-    const local = builder.pathFromRoot("../lib/zig/zig-out/toolchain.tar.gz");
+    const local = root_path(builder, "../lib/zig/zig-out/toolchain.tar.gz");
     const has_local = if (std.Io.Dir.cwd().access(builder.graph.io, local, .{})) true else |_| false;
     const archive: ?[]const u8 = if (given) |path|
         (if (path.len == 0) null else path)
@@ -88,7 +86,7 @@ fn add_compiler(
         local
     else
         null;
-    const release = optimize != .Debug;
+    const release = optimize != .debug;
     const publr_zig = if (archive) |path|
         builder.dependency("publr_zig", .{
             .target = target,
@@ -109,11 +107,9 @@ fn add_tidy(builder: *std.Build) *std.Build.Step {
     const tidy = builder.addExecutable(.{
         .name = "tidy",
         .root_module = builder.createModule(.{
-            .root_source_file = .{
-                .cwd_relative = builder.pathFromRoot("../publr/scripts/tidy.zig"),
-            },
+            .root_source_file = builder.path("../publr/scripts/tidy.zig"),
             .target = builder.graph.host,
-            .optimize = .Debug,
+            .optimize = .debug,
         }),
     });
     const run = builder.addRunArtifact(tidy);
@@ -125,4 +121,24 @@ fn add_tidy(builder: *std.Build) *std.Build.Step {
     builder.step("tidy", "The options rule of Publr's tidy").dependOn(&run.step);
 
     return &run.step;
+}
+
+/// `sub_path` of this repository, absolute: Zig gives the build its root relative to the
+/// working directory, and a step run in another folder must still find the path.
+fn root_path(builder: *std.Build, sub_path: []const u8) []const u8 {
+    std.debug.assert(sub_path.len > 0);
+    std.debug.assert(!std.fs.path.isAbsolute(sub_path));
+
+    const arena = builder.graph.arena;
+    const relative = builder.root.joinString(arena, sub_path) catch @panic("OOM");
+
+    if (std.fs.path.isAbsolute(relative)) {
+        return relative;
+    }
+
+    const working = std.process.currentPathAlloc(builder.graph.io, arena) catch |err| {
+        std.debug.panic("the working directory: {t}", .{err});
+    };
+
+    return std.fs.path.resolve(arena, &.{ working, relative }) catch @panic("OOM");
 }
