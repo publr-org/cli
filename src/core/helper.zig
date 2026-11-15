@@ -159,11 +159,13 @@ fn where(init: std.process.Init, arena: std.mem.Allocator, target: []const u8) !
     const all = try sites_module.Sites.find(&config);
     var site = all.named(name) catch return null;
 
+    const publr = try versions.binary_for(&config, site);
+
     if (!server.running(config.io, site)) {
-        try server.start(&config, &site, try versions.binary_for(&config, site));
+        try server.start(&config, &site, publr);
     }
 
-    return try sign_on.link(&config, site, back);
+    return try sign_on.entry(&config, &site, publr, back);
 }
 
 fn decode(arena: std.mem.Allocator, text: []const u8) ![]const u8 {

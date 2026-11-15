@@ -8,6 +8,7 @@ const std = @import("std");
 const config_module = @import("config.zig");
 const sites_module = @import("sites.zig");
 const server = @import("server.zig");
+const versions = @import("versions.zig");
 
 const Ed25519 = std.crypto.sign.Ed25519;
 const base64 = std.base64.url_safe_no_pad;
@@ -55,6 +56,106 @@ pub fn public_key_hex(config: *const Config) ![Ed25519.PublicKey.encoded_length 
     const pair = try Ed25519.KeyPair.generateDeterministic(try seed(config));
 
     return std.fmt.bytesToHex(pair.public_key.toBytes(), .lower);
+}
+
+/// How many accounts one `user list` page holds, and how many pages are read at most.
+const users_page: u32 = 200;
+const users_pages_max: u32 = 64;
+const users_bytes_max: u32 = 16 << 20;
+
+/// The way into the running site at `back`: signed in as its first admin, or, before it has
+/// any account, the plain address (for the admin, Publr's setup page, where the first admin is
+/// made). The admin is asked of the site's own Publr each time and kept in `.publr/local.json`.
+pub fn entry(config: *const Config, site: *Site, publr: []const u8, back: []const u8) ![]const u8 {
+    std.debug.assert(back.len > 0 and back[0] == '/');
+    std.debug.assert(publr.len > 0);
+
+    const admin = try first_admin(config, site.*, publr);
+
+    if (!std.mem.eql(u8, admin, site.local.email)) {
+        site.local.email = admin;
+        try sites_module.save(config, site.*);
+    }
+
+    if (admin.len > 0) {
+        return link(config, site.*, back);
+    }
+
+    if (std.mem.startsWith(u8, back, "/admin")) {
+        return std.fmt.allocPrint(config.arena, "{s}/admin", .{try server.admin_origin(config.arena, site.*)});
+    }
+
+    return std.fmt.allocPrint(config.arena, "{s}{s}", .{ try server.site_url(config.arena, site.*), back });
+}
+
+/// The account `site` signs in as: the one it remembers while that is still an active admin,
+/// else the earliest active admin; empty when it has none.
+fn first_admin(config: *const Config, site: Site, publr: []const u8) ![]const u8 {
+    const User = struct {
+        email: []const u8,
+        roles: []const []const u8 = &.{},
+        active: bool = true,
+    };
+    const Page = struct {
+        users: []const User = &.{},
+        total: u32 = 0,
+    };
+    var earliest: []const u8 = "";
+    var offset: u32 = 0;
+    var pages: u32 = 0;
+
+    while (pages < users_pages_max) : (pages += 1) {
+        const limit = try std.fmt.allocPrint(config.arena, "{d}", .{users_page});
+        const from = try std.fmt.allocPrint(config.arena, "{d}", .{offset});
+        const result = try std.process.run(config.arena, config.io, .{
+            .argv = &.{ publr, "--as-admin", "user", "list", "--limit", limit, "--offset", from },
+            .cwd = .{
+                .path = site.folder,
+            },
+            .stdout_limit = .limited(users_bytes_max),
+        });
+
+        if (!versions.succeeded(result.term)) {
+            std.debug.print("publr: could not list {s}'s accounts:\n{s}", .{ site.name, result.stderr });
+            return error.PublrFailed;
+        }
+
+        const page = try std.json.parseFromSliceLeaky(Page, config.arena, result.stdout, .{
+            .ignore_unknown_fields = true,
+        });
+
+        for (page.users) |user| {
+            if (!user.active or !holds_admin(user.roles)) {
+                continue;
+            }
+
+            if (site.local.email.len > 0 and std.mem.eql(u8, user.email, site.local.email)) {
+                return user.email;
+            }
+
+            if (earliest.len == 0) {
+                earliest = user.email;
+            }
+        }
+
+        offset += @intCast(page.users.len);
+
+        if (page.users.len == 0 or offset >= page.total) {
+            break;
+        }
+    }
+
+    return earliest;
+}
+
+fn holds_admin(roles: []const []const u8) bool {
+    for (roles) |role| {
+        if (std.mem.eql(u8, role, "admin")) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 /// `http://admin.localhost:<port>/auth/sign-on?token=…&return=<path>`: opened, it signs the

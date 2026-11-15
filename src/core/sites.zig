@@ -16,15 +16,14 @@ pub const sites_max: u32 = 1024;
 /// Clear of the dev server (8080, 8081), the smoke tests (8090, 8091) and review (8801+).
 pub const first_port: u16 = 8100;
 pub const last_port: u16 = 8799;
-/// The admin every local site is made with, and the one a signed link signs in.
-pub const email = "admin@publr.localhost";
 const local_bytes_max: u32 = 64 << 10;
 
 /// What this computer keeps of a site.
 pub const Local = struct {
     /// Its own port, never changed once given; 0 until it first starts.
     port: u16 = 0,
-    email: []const u8 = email,
+    /// The admin a signed link signs in as; asked of the site's Publr, empty until it has one.
+    email: []const u8 = "",
     created_ms: i64 = 0,
     /// The server's process while the command started one; 0 when stopped.
     pid: i32 = 0,

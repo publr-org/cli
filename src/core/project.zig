@@ -113,39 +113,12 @@ fn pick(config: *const Config, given: []const u8) ![]const u8 {
     return versions.newest(config);
 }
 
-/// The site's first admin made (once), its server started, the command trusted as its
-/// sign-on issuer, the helper running.
+/// The site's server started, the command trusted as its sign-on issuer, the helper running.
+/// Its first admin is made on Publr's setup page, never here.
 pub fn set_up(config: *const Config, site: *Site, publr: []const u8, self_path: []const u8) !void {
     std.debug.assert(publr.len > 0);
 
-    const own = try std.fs.path.join(config.arena, &.{ site.folder, sites_module.own_folder });
-    const account_path = try std.fs.path.join(config.arena, &.{ own, "admin.json" });
-    const cwd = std.Io.Dir.cwd();
-
     try server.ensure_port(config, site);
-    try cwd.createDirPath(config.io, own);
-
-    // A site with a database already has its people: one made elsewhere, cloned, or set up
-    // before.
-    const database = try std.fs.path.join(config.arena, &.{ site.folder, "data", "publr.db" });
-    const made = exists(config.io, account_path) or exists(config.io, database);
-
-    if (!made) {
-        const account = try run(config, publr, site.folder, &.{
-            "project",
-            "init",
-            "--email",
-            site.local.email,
-            "--display_name",
-            "Admin",
-        });
-
-        try cwd.writeFile(config.io, .{
-            .sub_path = account_path,
-            .data = account,
-        });
-    }
-
     try server.start(config, site, publr);
 
     const key = try sign_on.public_key_hex(config);
@@ -162,12 +135,6 @@ pub fn set_up(config: *const Config, site: *Site, publr: []const u8, self_path: 
         site.name,
     });
     try helper.ensure(config, self_path);
-}
-
-fn exists(io: std.Io, path: []const u8) bool {
-    std.Io.Dir.cwd().access(io, path, .{}) catch return false;
-
-    return true;
 }
 
 /// The entry of the list `folder` belongs under: a listed folder of sites around it, or the

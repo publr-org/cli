@@ -492,12 +492,12 @@ fn new(
         return error.BadName;
     }
 
-    const site = try core.project.new(config, chosen, self_path, options);
+    var site = try core.project.new(config, chosen, self_path, options);
 
     try out.print("created {s} in {s}\n", .{ site.name, site.folder });
     try print_links(config, out, site);
     try out.flush();
-    try browse(init, try core.sign_on.link(config, site, "/admin"));
+    try browse(init, try core.sign_on.entry(config, &site, try versions.binary_for(config, site), "/admin"));
 }
 
 fn init_folder(
@@ -661,10 +661,12 @@ fn open(
 
     var site = try one(config, name);
 
-    try server.start(config, &site, try versions.binary_for(config, site));
+    const publr = try versions.binary_for(config, site);
+
+    try server.start(config, &site, publr);
     try core.helper.ensure(config, self_path);
 
-    const link = try core.sign_on.link(config, site, back);
+    const link = try core.sign_on.entry(config, &site, publr, back);
 
     if (printed) {
         return out.print("{s}\n", .{link});
