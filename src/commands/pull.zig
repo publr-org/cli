@@ -90,12 +90,12 @@ pub fn linked_here(init: std.process.Init, config: *const Config, code: *u8) !?L
     };
 }
 
-/// The Publr a linked folder runs: its own or its pin, else (a folder cloned before pins)
-/// the release its site runs, pinned now.
+/// The Publr a linked folder runs: the one chosen or its pin, else (a folder cloned before
+/// pins) the release its site runs, pinned now.
 fn publr_of(init: std.process.Init, config: *const Config, folder: []const u8) ![]const u8 {
     const site = try core.sites.load(config, folder, folder);
 
-    if (try versions.own_binary(config, folder) != null or try versions.pin_of(config, folder) != null) {
+    if (try versions.pin_of(config, folder) != null) {
         return versions.binary_for(config, site);
     }
 
@@ -122,7 +122,7 @@ fn publr_of(init: std.process.Init, config: *const Config, folder: []const u8) !
 
     try site_data.pin(config, folder, release);
 
-    return versions.kept(config, release);
+    return versions.binary_for(config, site);
 }
 
 pub fn run(
@@ -220,14 +220,12 @@ pub fn ensure_base(config: *const Config, linked: *Linked) !void {
 fn follow_release(config: *const Config, linked: *Linked) !void {
     const release = try transfer.release_of(config.io, config.arena, linked.site) orelse return;
     const pinned = try versions.pin_of(config, linked.folder);
-    const own = try versions.own_binary(config, linked.folder);
-
-    if (own != null or (pinned != null and std.mem.eql(u8, pinned.?, release))) {
+    if (pinned != null and std.mem.eql(u8, pinned.?, release)) {
         return;
     }
 
     try site_data.pin(config, linked.folder, release);
-    linked.publr = try versions.kept(config, release);
+    linked.publr = try versions.binary_for(config, try core.sites.load(config, linked.folder, linked.folder));
 }
 
 fn serving_here(config: *const Config, folder: []const u8) bool {

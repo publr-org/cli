@@ -28,6 +28,9 @@ pub const Local = struct {
     created_ms: i64 = 0,
     /// The server's process while the command started one; 0 when stopped.
     pid: i32 = 0,
+    /// A Publr this site runs instead of its pinned release (one built from source, say);
+    /// empty follows the config's choice, else the pin.
+    publr: []const u8 = "",
 };
 
 pub const Site = struct {

@@ -47,6 +47,9 @@ const usage =
     \\  publr config               where sites go and which folders hold them
     \\    config folder <path>       the default folder
     \\    config folders add|remove <path>
+    \\    config publr <path>|<release>|pins [<name>...]
+    \\                               a Publr those sites (or every site) run instead of
+    \\                               their pins (one built from source, say); `pins` undoes it
     \\  publr versions             the Publr releases kept, and which site runs which
     \\    versions use <version> <name>...|--all
     \\
@@ -76,6 +79,7 @@ const usage =
     \\`publr content list`, `publr serve`, `publr agents`.
     \\To a site elsewhere: `publr --site <address> [--env <copy>] <command>`, or PUBLR_SITE,
     \\or from a folder whose .publr/site names it.
+    \\`publr --publr <path>|<release> <command>`: every site runs that Publr for this call.
     \\
 ;
 
@@ -136,6 +140,14 @@ fn run(init: std.process.Init) !u8 {
 
     if (words.len == 0) {
         return error.Usage;
+    }
+
+    if (globals.publr) |given| {
+        if (given.len == 0) {
+            return error.Usage;
+        }
+
+        config.call_publr = try versions.resolve(&config, given);
     }
 
     // `plugin build` is the command's; `plugin` itself, and every other word of it, Publr's.
@@ -237,9 +249,12 @@ const Globals = struct {
     site: ?[]const u8 = null,
     /// `--env <name>`: one of that site's copies, or of the site here.
     env: ?[]const u8 = null,
+    /// `--publr <release|path>`: the Publr every site runs for this call.
+    publr: ?[]const u8 = null,
 };
 
-/// The leading `--site <address>` and `--env <name>`, in either order, taken off the words.
+/// The leading `--site <address>`, `--env <name>` and `--publr <release|path>`, in any order,
+/// taken off the words.
 fn take_globals(words: *[]const []const u8) !Globals {
     var globals: Globals = .{};
 
@@ -250,6 +265,8 @@ fn take_globals(words: *[]const []const u8) !Globals {
             globals.site = words.*[1];
         } else if (std.mem.eql(u8, flag, "--env") and globals.env == null) {
             globals.env = words.*[1];
+        } else if (std.mem.eql(u8, flag, "--publr") and globals.publr == null) {
+            globals.publr = words.*[1];
         } else {
             break;
         }
@@ -787,6 +804,7 @@ fn configure(config: *Config, out: *std.Io.Writer, rest: []const []const u8) !vo
             try out.print("also            {s}\n", .{folder});
         }
 
+        try out.print("publr           {s}\n", .{if (config.publr.len > 0) config.publr else "each site's pinned release"});
         try out.print("config          {s}\n", .{try config.path(&.{core.config.file_name})});
         return;
     }
@@ -794,6 +812,35 @@ fn configure(config: *Config, out: *std.Io.Writer, rest: []const []const u8) !vo
     if (std.mem.eql(u8, rest[0], "folder") and rest.len == 2) {
         config.folder = try core.sites.absolute(config, rest[1]);
         try std.Io.Dir.cwd().createDirPath(config.io, config.folder);
+    } else if (std.mem.eql(u8, rest[0], "publr") and rest.len >= 2) {
+        const pins = std.mem.eql(u8, rest[1], "pins");
+        const chosen = if (pins) "" else try versions.resolve(config, rest[1]);
+
+        if (rest.len == 2) {
+            config.publr = chosen;
+        } else {
+            // Named sites only: the choice is theirs, kept on this computer.
+            for (try many(config, rest[2..])) |chosen_site| {
+                var site = chosen_site;
+
+                const was_running = server.running(config.io, site);
+
+                if (was_running) {
+                    try server.stop(config, &site);
+                }
+
+                site.local.publr = chosen;
+                try core.sites.save(config, site);
+
+                if (was_running) {
+                    try server.start(config, &site, try versions.binary_for(config, site));
+                }
+
+                try out.print("{s} runs {s}\n", .{ site.name, if (pins) "its pinned release" else chosen });
+            }
+
+            return;
+        }
     } else if (std.mem.eql(u8, rest[0], "folders") and rest.len == 3) {
         const folder = try core.sites.absolute(config, rest[2]);
 
@@ -853,7 +900,6 @@ fn versions_command(config: *const Config, out: *std.Io.Writer, rest: []const []
             try server.stop(config, &running);
         }
 
-        try versions.unlink_own(config, site);
         try versions.set_pin(config, site.folder, chosen);
 
         if (was_running) {

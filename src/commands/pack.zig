@@ -76,7 +76,7 @@ pub fn unpack(config: *const Config, out: *std.Io.Writer, rest: []const []const 
 
     try site_data.import_from(config, publr, folder, unpacked, .{});
 
-    if (try versions.pin_of(config, folder) == null and try versions.own_binary(config, folder) == null) {
+    if (try versions.pin_of(config, folder) == null) {
         try versions.set_pin(config, folder, manifest.publr);
     }
 

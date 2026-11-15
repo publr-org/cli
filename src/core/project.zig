@@ -53,9 +53,7 @@ pub fn init(config: *Config, folder: []const u8, self_path: []const u8, options:
 
         try list_folder(config, folder);
 
-        if ((try versions.pin_of(config, folder)) == null and
-            (try versions.own_binary(config, folder)) == null)
-        {
+        if ((try versions.pin_of(config, folder)) == null) {
             try versions.set_pin(config, folder, try pick(config, options.publr));
         }
 

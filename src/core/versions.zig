@@ -1,7 +1,8 @@
 //! Which Publr a site runs. A site pins a release in its `publr.zon` (`.publr = "0.6.4"`);
 //! the command keeps each release it needs in `versions/<v>/publr`, fetched from where Publr
-//! publishes them and checked against the signature Publr's own updates trust. A `publr`
-//! inside the site's folder overrides the pin.
+//! publishes them and checked against the signature Publr's own updates trust. A Publr
+//! chosen with `--publr`, for the site, or for every site (one built from source, say) runs
+//! instead of the pin.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -104,27 +105,51 @@ fn read_project(config: *const Config, folder: []const u8) ![:0]const u8 {
     );
 }
 
-/// `<folder>/publr` when the site keeps a Publr of its own, else null.
-pub fn own_binary(config: *const Config, folder: []const u8) !?[]const u8 {
-    const path = try std.fs.path.join(config.arena, &.{ folder, binary_name });
+/// The Publr chosen to run `site` instead of its pin, or null: `--publr` for this call, else
+/// the site's own choice, else the one chosen for every site.
+pub fn chosen_binary(config: *const Config, site: Site) ?[]const u8 {
+    for ([_][]const u8{ config.call_publr, site.local.publr, config.publr }) |chosen| {
+        if (chosen.len > 0) {
+            return chosen;
+        }
+    }
 
-    std.Io.Dir.cwd().access(config.io, path, .{}) catch return null;
+    return null;
+}
+
+/// What `--publr` or `config publr` names, as a binary: a path as given (made absolute), or
+/// a release, fetched when not kept.
+pub fn resolve(config: *const Config, given: []const u8) ![]const u8 {
+    std.debug.assert(given.len > 0);
+
+    if (std.mem.indexOfScalar(u8, given, '/') == null) {
+        return kept(config, given);
+    }
+
+    const path = try sites_module.absolute(config, given);
+
+    std.Io.Dir.cwd().access(config.io, path, .{}) catch {
+        std.debug.print("publr: no Publr at {s}\n", .{path});
+        return error.NoSuchBinary;
+    };
 
     return path;
 }
 
-/// What a site runs, said in words: `0.6.4`, `own`, or `none`.
+/// What a site runs, said in words: `0.6.4`, `chosen` (a Publr chosen for every site), or
+/// `none`.
 pub fn running_label(config: *const Config, site: Site) ![]const u8 {
-    if ((try own_binary(config, site.folder)) != null) {
-        return "own";
+    if (chosen_binary(config, site) != null) {
+        return "chosen";
     }
 
     return (try pin_of(config, site.folder)) orelse "none";
 }
 
-/// The Publr `site` runs: its own, else its pinned release, fetched when missing.
+/// The Publr `site` runs: the one chosen for every site, else its pinned release, fetched
+/// when missing.
 pub fn binary_for(config: *const Config, site: Site) ![]const u8 {
-    if (try own_binary(config, site.folder)) |path| {
+    if (chosen_binary(config, site)) |path| {
         return path;
     }
 
@@ -361,25 +386,6 @@ pub fn get(io: std.Io, url: []const u8, out: *std.Io.Writer) !void {
     if (result.status != .ok) {
         return error.NotFound;
     }
-}
-
-/// The site's own `publr` taken away, when it is a link; a real binary is the person's, and
-/// stays.
-pub fn unlink_own(config: *const Config, site: Site) !void {
-    const link = try std.fs.path.join(config.arena, &.{ site.folder, binary_name });
-    var buffer: [config_module.path_len_max]u8 = undefined;
-
-    _ = std.Io.Dir.cwd().readLink(config.io, link, &buffer) catch |err| switch (err) {
-        error.FileNotFound => return,
-        error.NotLink => {
-            std.debug.print("publr: {s} is a binary of its own, not a link; " ++
-                "remove it to run the pin\n", .{link});
-            return error.OwnBinary;
-        },
-        else => return err,
-    };
-
-    try std.Io.Dir.cwd().deleteFile(config.io, link);
 }
 
 pub fn succeeded(term: std.process.Child.Term) bool {

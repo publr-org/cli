@@ -21,6 +21,11 @@ pub const Config = struct {
     folder: []const u8,
     /// The other entries: folders of sites, and single sites' own folders.
     folders: []const []const u8,
+    /// A Publr every site runs instead of its pinned release (one built from source, say);
+    /// empty runs the pins.
+    publr: []const u8 = "",
+    /// `--publr`: the Publr for this call alone, ahead of `publr`; never saved.
+    call_publr: []const u8 = "",
 
     /// Read, or made with the defaults the first time. Everything it holds is in `arena`.
     pub fn load(
@@ -56,6 +61,7 @@ pub const Config = struct {
         const File = struct {
             folder: []const u8 = "",
             folders: []const []const u8 = &.{},
+            publr: []const u8 = "",
         };
         const file = std.zon.parse.fromSliceAlloc(File, arena, text, null, .{
             .ignore_unknown_fields = true,
@@ -69,6 +75,7 @@ pub const Config = struct {
         }
 
         config.folders = file.folders;
+        config.publr = file.publr;
 
         return config;
     }
@@ -89,6 +96,7 @@ pub const Config = struct {
         }
 
         try writer.writeAll("    },\n");
+        try writer.print("    .publr = \"{f}\",\n", .{std.zig.fmtString(config.publr)});
         try writer.writeAll("}\n");
 
         try std.Io.Dir.cwd().writeFile(config.io, .{
