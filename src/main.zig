@@ -47,11 +47,8 @@ const usage =
     \\  publr config               where sites go and which folders hold them
     \\    config folder <path>       the default folder
     \\    config folders add|remove <path>
-    \\    config workspace <path>    the Publr workspace, for `versions use workspace`
     \\  publr versions             the Publr releases kept, and which site runs which
     \\    versions use <version> <name>...|--all
-    \\    versions use workspace <name>...|--all [--debug]
-    \\                               the workspace's Publr built and linked into the sites
     \\
     \\  publr login <address>      this computer signed in to a Publr site, approved there
     \\                             --name, --scope read|write|production|publish,
@@ -790,7 +787,6 @@ fn configure(config: *Config, out: *std.Io.Writer, rest: []const []const u8) !vo
             try out.print("also            {s}\n", .{folder});
         }
 
-        try out.print("workspace       {s}\n", .{if (config.workspace.len > 0) config.workspace else "-"});
         try out.print("config          {s}\n", .{try config.path(&.{core.config.file_name})});
         return;
     }
@@ -798,8 +794,6 @@ fn configure(config: *Config, out: *std.Io.Writer, rest: []const []const u8) !vo
     if (std.mem.eql(u8, rest[0], "folder") and rest.len == 2) {
         config.folder = try core.sites.absolute(config, rest[1]);
         try std.Io.Dir.cwd().createDirPath(config.io, config.folder);
-    } else if (std.mem.eql(u8, rest[0], "workspace") and rest.len == 2) {
-        config.workspace = try core.sites.absolute(config, rest[1]);
     } else if (std.mem.eql(u8, rest[0], "folders") and rest.len == 3) {
         const folder = try core.sites.absolute(config, rest[2]);
 
@@ -847,27 +841,9 @@ fn versions_command(config: *const Config, out: *std.Io.Writer, rest: []const []
     }
 
     const chosen = rest[1];
-    var debug = false;
-    var names: std.ArrayList([]const u8) = .empty;
+    const targets = try many(config, rest[2..]);
 
-    for (rest[2..]) |word| {
-        if (std.mem.eql(u8, word, "--debug")) {
-            debug = true;
-        } else {
-            try names.append(config.arena, word);
-        }
-    }
-
-    const targets = try many(config, names.items);
-    const workspace = std.mem.eql(u8, chosen, versions.workspace_name);
-
-    if (workspace) {
-        try versions.build_workspace(config, .{
-            .debug = debug,
-        });
-    } else {
-        _ = try versions.kept(config, chosen);
-    }
+    _ = try versions.kept(config, chosen);
 
     for (targets) |site| {
         var running = site;
@@ -877,12 +853,8 @@ fn versions_command(config: *const Config, out: *std.Io.Writer, rest: []const []
             try server.stop(config, &running);
         }
 
-        if (workspace) {
-            try versions.link_workspace(config, site);
-        } else {
-            try versions.unlink_own(config, site);
-            try versions.set_pin(config, site.folder, chosen);
-        }
+        try versions.unlink_own(config, site);
+        try versions.set_pin(config, site.folder, chosen);
 
         if (was_running) {
             try server.start(config, &running, try versions.binary_for(config, site));

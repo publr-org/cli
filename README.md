@@ -13,7 +13,7 @@ publr open shop [path]    the admin in your browser, signed in (--print: just th
 publr logs shop           the end of its server log
 publr rm shop [--yes]     stop it and move it to its folder's .trash
 publr init [<path>]       a folder made a site, or an existing one listed
-publr config              the default folder, other folders, the workspace
+publr config              the default folder and the other folders
 publr versions            the Publr releases kept, which site runs which
 cd ~/Publr/shop && publr content list    handed on to the site's Publr
 ```
@@ -25,14 +25,6 @@ Config lives in `~/Library/Application Support/Publr` (macOS) or `~/.config/publ
 (`$PUBLR_CONFIG` overrides): `config.zon`, the releases kept (`versions/`), the sign-on key
 every local site trusts, the helper's log. Each site keeps what this computer knows of it
 (port, process) in its own `.publr/local.json`.
-
-## Working on Publr
-
-`publr config workspace ~/Documents/publrv2`, then
-`publr versions use workspace <name>…|--all [--debug]` builds Publr from the workspace
-(ReleaseFast, or Debug while you work; no local apps or plugins compiled in) and links it
-into those sites. Run it again to rebuild; `publr versions use <version> <name>` goes back to
-a release.
 
 ## Building
 

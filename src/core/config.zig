@@ -21,8 +21,6 @@ pub const Config = struct {
     folder: []const u8,
     /// The other entries: folders of sites, and single sites' own folders.
     folders: []const []const u8,
-    /// The Publr workspace (the folder with `workspace.zon`), for `versions use workspace`.
-    workspace: []const u8,
 
     /// Read, or made with the defaults the first time. Everything it holds is in `arena`.
     pub fn load(
@@ -39,7 +37,6 @@ pub const Config = struct {
             .root = root,
             .folder = try std.fs.path.join(arena, &.{ home, default_folder_name }),
             .folders = &.{},
-            .workspace = "",
         };
 
         try std.Io.Dir.cwd().createDirPath(io, root);
@@ -59,7 +56,6 @@ pub const Config = struct {
         const File = struct {
             folder: []const u8 = "",
             folders: []const []const u8 = &.{},
-            workspace: []const u8 = "",
         };
         const file = std.zon.parse.fromSliceAlloc(File, arena, text, null, .{
             .ignore_unknown_fields = true,
@@ -73,7 +69,6 @@ pub const Config = struct {
         }
 
         config.folders = file.folders;
-        config.workspace = file.workspace;
 
         return config;
     }
@@ -94,7 +89,6 @@ pub const Config = struct {
         }
 
         try writer.writeAll("    },\n");
-        try writer.print("    .workspace = \"{f}\",\n", .{std.zig.fmtString(config.workspace)});
         try writer.writeAll("}\n");
 
         try std.Io.Dir.cwd().writeFile(config.io, .{

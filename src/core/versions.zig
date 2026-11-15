@@ -1,8 +1,7 @@
 //! Which Publr a site runs. A site pins a release in its `publr.zon` (`.publr = "0.6.4"`);
 //! the command keeps each release it needs in `versions/<v>/publr`, fetched from where Publr
 //! publishes them and checked against the signature Publr's own updates trust. A `publr`
-//! inside the site's folder overrides the pin: the workspace build, linked in while Publr
-//! itself is worked on.
+//! inside the site's folder overrides the pin.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -13,7 +12,6 @@ const Config = config_module.Config;
 const Site = sites_module.Site;
 
 pub const folder_name = "versions";
-pub const workspace_name = "workspace";
 pub const binary_name = "publr";
 /// The public half of the key Publr's Release workflow signs `SHA256SUMS` with; the same one
 /// Publr's updates check (`publr/src/model/release.zig`).
@@ -26,8 +24,6 @@ const sums_name = "SHA256SUMS";
 const signature_name = "SHA256SUMS.sig";
 const project_bytes_max: u32 = 1 << 20;
 const binary_bytes_max: u32 = 512 << 20;
-const empty_folder = ".zig-cache/publr-cli-empty";
-const build_attempts: u32 = 3;
 
 /// This machine's file in a release: `publr-macos-aarch64`, `publr-linux-x86_64`.
 pub fn asset_name() []const u8 {
@@ -117,10 +113,10 @@ pub fn own_binary(config: *const Config, folder: []const u8) !?[]const u8 {
     return path;
 }
 
-/// What a site runs, said in words: `0.6.4`, `workspace`, `own`, or `none`.
+/// What a site runs, said in words: `0.6.4`, `own`, or `none`.
 pub fn running_label(config: *const Config, site: Site) ![]const u8 {
-    if (try own_binary(config, site.folder)) |path| {
-        return if (try links_workspace(config, path)) workspace_name else "own";
+    if ((try own_binary(config, site.folder)) != null) {
+        return "own";
     }
 
     return (try pin_of(config, site.folder)) orelse "none";
@@ -169,10 +165,6 @@ pub fn list(config: *const Config) ![]const []const u8 {
 
     while (try iterator.next(config.io)) |item| {
         if (item.kind != .directory or item.name[0] == '.') {
-            continue;
-        }
-
-        if (std.mem.eql(u8, item.name, workspace_name)) {
             continue;
         }
 
@@ -369,93 +361,6 @@ pub fn get(io: std.Io, url: []const u8, out: *std.Io.Writer) !void {
     if (result.status != .ok) {
         return error.NotFound;
     }
-}
-
-/// `versions/workspace/bin/publr`: the workspace's Publr, as last built.
-pub fn workspace_binary(config: *const Config) ![]const u8 {
-    return config.path(&.{ folder_name, workspace_name, "bin", binary_name });
-}
-
-fn links_workspace(config: *const Config, path: []const u8) !bool {
-    var buffer: [config_module.path_len_max]u8 = undefined;
-    const length = std.Io.Dir.cwd().readLink(config.io, path, &buffer) catch return false;
-
-    return std.mem.eql(u8, buffer[0..length], try workspace_binary(config));
-}
-
-pub const BuildOptions = struct {
-    /// Debug instead of ReleaseFast: quicker to build, slower to serve.
-    debug: bool = false,
-};
-
-/// `zig build` in the workspace's `publr`, installed into `versions/workspace`: no local
-/// apps or plugins compiled in, since the workspace holds whatever is being worked on.
-pub fn build_workspace(config: *const Config, options: BuildOptions) !void {
-    if (config.workspace.len == 0) {
-        std.debug.print("publr: no workspace yet: `publr config workspace <path>` " ++
-            "(the folder with workspace.zon)\n", .{});
-        return error.NoWorkspace;
-    }
-
-    const arena = config.arena;
-    const io = config.io;
-    const core = try std.fs.path.join(arena, &.{ config.workspace, "publr" });
-    var core_dir = try std.Io.Dir.cwd().openDir(io, core, .{});
-    defer core_dir.close(io);
-
-    try core_dir.createDirPath(io, empty_folder ++ "/apps");
-    try core_dir.createDirPath(io, empty_folder ++ "/plugins");
-
-    std.debug.print("publr: building Publr from {s} ({s}, no local apps or plugins)…\n", .{
-        core,
-        if (options.debug) "Debug" else "ReleaseFast",
-    });
-
-    const prefix = try config.path(&.{ folder_name, workspace_name });
-    const argv = [_][]const u8{
-        "zig",
-        "build",
-        "-Dapps=" ++ empty_folder ++ "/apps",
-        "-Dplugins=" ++ empty_folder ++ "/plugins",
-        if (options.debug) "-Doptimize=Debug" else "-Doptimize=ReleaseFast",
-        "-p",
-        prefix,
-    };
-    var tries: u32 = 0;
-
-    while (tries < build_attempts) : (tries += 1) {
-        const result = try std.process.run(arena, io, .{
-            .argv = &argv,
-            .cwd = .{
-                .path = core,
-            },
-        });
-
-        if (succeeded(result.term)) {
-            return;
-        }
-
-        // Another session editing Publr mid-build fails it: again, a moment later.
-        if (std.mem.indexOf(u8, result.stderr, "file contents changed") == null) {
-            const tail = result.stderr[result.stderr.len -| 3000..];
-
-            std.debug.print("publr: zig build failed:\n{s}\n", .{tail});
-            return error.BuildFailed;
-        }
-
-        try std.Io.sleep(io, .fromSeconds(5), .awake);
-    }
-
-    return error.BuildFailed;
-}
-
-/// The workspace build linked into `site`'s folder, so it runs instead of the pin.
-pub fn link_workspace(config: *const Config, site: Site) !void {
-    const target = try workspace_binary(config);
-    const link = try std.fs.path.join(config.arena, &.{ site.folder, binary_name });
-
-    try unlink_own(config, site);
-    try std.Io.Dir.cwd().symLink(config.io, target, link, .{});
 }
 
 /// The site's own `publr` taken away, when it is a link; a real binary is the person's, and
