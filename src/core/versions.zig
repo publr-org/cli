@@ -207,6 +207,9 @@ pub fn list(config: *const Config) ![]const []const u8 {
             continue;
         }
 
+        // Only a release is kept here; any other folder is not one.
+        _ = std.SemanticVersion.parse(item.name) catch continue;
+
         if (found.items.len == kept_max) {
             break;
         }
@@ -220,10 +223,10 @@ pub fn list(config: *const Config) ![]const []const u8 {
 }
 
 fn older(_: void, left: []const u8, right: []const u8) bool {
-    const a = std.SemanticVersion.parse(left) catch return std.mem.order(u8, left, right) == .lt;
-    const b = std.SemanticVersion.parse(right) catch return true;
+    const left_version = std.SemanticVersion.parse(left) catch unreachable;
+    const right_version = std.SemanticVersion.parse(right) catch unreachable;
 
-    return a.order(b) == .lt;
+    return left_version.order(right_version) == .lt;
 }
 
 /// The newest release published, or the newest kept when the list cannot be reached.
@@ -366,8 +369,11 @@ pub fn sum_of(sums: []const u8, file: []const u8) ?[]const u8 {
     return null;
 }
 
+const request_head_bytes_max = 16 * 1024;
+
 pub fn get(io: std.Io, url: []const u8, out: *std.Io.Writer) !void {
     std.debug.assert(url.len > 0);
+    std.debug.assert(url.len < request_head_bytes_max);
 
     // Its own memory: TLS loads the system's certificates, more than a request holds.
     var client_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -375,6 +381,9 @@ pub fn get(io: std.Io, url: []const u8, out: *std.Io.Writer) !void {
     var client: std.http.Client = .{
         .allocator = client_arena.allocator(),
         .io = io,
+        // A whole request head in one buffer: with the default 1 KiB, a head that runs past
+        // it (a release asset's signed address is ~900 bytes) reaches the server damaged.
+        .write_buffer_size = request_head_bytes_max,
     };
     defer client.deinit();
 
