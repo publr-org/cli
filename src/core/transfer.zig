@@ -132,14 +132,24 @@ pub fn size_of(io: std.Io, arena: std.mem.Allocator, site: credentials.Site) !?S
     });
 }
 
+/// Who else hears how far a pack or a download is, beside the terminal: a clone's progress
+/// page.
+pub const Watch = struct {
+    context: ?*anyopaque = null,
+    /// How far the site is packing it, in ten-thousandths.
+    packing: ?*const fn (context: *anyopaque, through: u32) void = null,
+    downloading: ?*const fn (context: *anyopaque, done_bytes: u64, total_bytes: u64) void = null,
+};
+
 /// The site packed for a clone (`asked`: what `POST /api/sites/pack` takes), followed until
-/// it is made, how far told on `out`; null, having said why, when it was not.
+/// it is made, how far told on `out` and to `watch`; null, having said why, when it was not.
 pub fn prepared(
     io: std.Io,
     arena: std.mem.Allocator,
     site: credentials.Site,
     asked: []const u8,
     out: *std.Io.Writer,
+    watch: Watch,
 ) !?Made {
     std.debug.assert(asked.len > 0);
 
@@ -183,6 +193,10 @@ pub fn prepared(
         try out.print("\rPacking on the site... {d}%", .{packing.through / 100});
         try out.flush();
 
+        if (watch.packing) |told| {
+            told(watch.context.?, packing.through);
+        }
+
         if (packing.made) |made| {
             try out.print("\rPacking on the site... done\n", .{});
 
@@ -206,13 +220,14 @@ pub fn prepared(
     }
 }
 
-/// The pack's pieces, in order, into `path`, how far told on `out`.
+/// The pack's pieces, in order, into `path`, how far told on `out` and to `watch`.
 pub fn fetch(
     io: std.Io,
     site: credentials.Site,
     bytes: u64,
     path: []const u8,
     out: *std.Io.Writer,
+    watch: Watch,
 ) !void {
     std.debug.assert(path.len > 0);
 
@@ -232,6 +247,10 @@ pub fn fetch(
         offset += taken;
         try out.print("\rDownloading... {d}% of {d} KiB", .{ offset * 100 / @max(bytes, 1), bytes / 1024 });
         try out.flush();
+
+        if (watch.downloading) |told| {
+            told(watch.context.?, offset, bytes);
+        }
 
         if (taken < piece_bytes_max) {
             break;

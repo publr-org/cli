@@ -72,7 +72,13 @@ pub fn ensure_port(config: *const Config, site: *Site) !void {
 
 /// Started with `publr` and answering, or an error naming the log to read.
 pub fn start(config: *const Config, site: *Site, publr: []const u8) !void {
+    return start_with(config, site, publr, &.{});
+}
+
+/// Started with `publr` and `more` after `serve`'s own words (`--plugin <file>`).
+pub fn start_with(config: *const Config, site: *Site, publr: []const u8, more: []const []const u8) !void {
     std.debug.assert(publr.len > 0);
+    std.debug.assert(more.len <= 16);
 
     try ensure_port(config, site);
 
@@ -92,8 +98,13 @@ pub fn start(config: *const Config, site: *Site, publr: []const u8) !void {
     const port = try std.fmt.allocPrint(arena, "{d}", .{site.local.port});
     const url = try site_url(arena, site.*);
     const admin = try admin_origin(arena, site.*);
+    var argv: std.ArrayList([]const u8) = .empty;
+
+    try argv.appendSlice(arena, &.{ publr, "serve", "--port", port, "--url", url, "--admin-url", admin });
+    try argv.appendSlice(arena, more);
+
     const child = try std.process.spawn(config.io, .{
-        .argv = &.{ publr, "serve", "--port", port, "--url", url, "--admin-url", admin },
+        .argv = argv.items,
         .cwd = .{
             .path = site.folder,
         },

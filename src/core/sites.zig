@@ -158,6 +158,27 @@ pub const Sites = struct {
     }
 };
 
+/// Where a clone's own server runs while the site comes down, in the command's folder:
+/// thrown away once the site is here.
+pub const clones_folder = "clones";
+
+/// The scratch site of a clone named `name` (`<site>-cloning`) while it runs, or null.
+pub fn cloning(config: *const Config, name: []const u8) !?Site {
+    std.debug.assert(name.len > 0);
+
+    if (!valid_name(name)) {
+        return null;
+    }
+
+    const folder = try config.path(&.{ clones_folder, name });
+
+    if (!is_site(config.io, config.arena, folder)) {
+        return null;
+    }
+
+    return try load(config, folder, folder);
+}
+
 pub fn is_site(io: std.Io, arena: std.mem.Allocator, folder: []const u8) bool {
     const file = std.fs.path.join(arena, &.{ folder, project_file }) catch return false;
 

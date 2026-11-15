@@ -19,6 +19,16 @@ pub fn build(builder: *std.Build) void {
     module.addAnonymousImport("skill", .{
         .root_source_file = builder.path("skills/build-on-publr/SKILL.md"),
     });
+    // The clone's progress page, a plugin `publr clone` builds for the site's release.
+    module.addAnonymousImport("clone_progress_main", .{
+        .root_source_file = builder.path("plugins/clone_progress/main.zig"),
+    });
+    module.addAnonymousImport("clone_progress_view", .{
+        .root_source_file = builder.path("plugins/clone_progress/ui/CloneProgress.ptsx"),
+    });
+    module.addAnonymousImport("clone_progress_steps", .{
+        .root_source_file = builder.path("plugins/clone_progress/ui/CloneSteps.ptsx"),
+    });
     module.addAnonymousImport("skill_core_changes", .{
         .root_source_file = builder.path("skills/build-on-publr/references/core-changes.md"),
     });

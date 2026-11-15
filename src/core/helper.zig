@@ -157,11 +157,13 @@ fn where(init: std.process.Init, arena: std.mem.Allocator, target: []const u8) !
 
     const config = try Config.load(init.io, arena, init.environ_map);
     const all = try sites_module.Sites.find(&config);
-    var site = all.named(name) catch return null;
+    // A clone still coming down answers on its own server, until the site takes over.
+    const arriving = try sites_module.cloning(&config, name);
+    var site = all.named(name) catch arriving orelse return null;
 
     const publr = try versions.binary_for(&config, site);
 
-    if (!server.running(config.io, site)) {
+    if (arriving == null and !server.running(config.io, site)) {
         try server.start(&config, &site, publr);
     }
 

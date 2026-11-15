@@ -358,14 +358,14 @@ fn bring_down(config: *const Config, linked: Linked, out: *std.Io.Writer) !?Brou
     const asked = try std.json.Stringify.valueAlloc(arena, .{
         .have = try held(config, linked),
     }, .{});
-    const made = try transfer.prepared(config.io, arena, linked.site, asked, out) orelse return null;
+    const made = try transfer.prepared(config.io, arena, linked.site, asked, out, .{}) orelse return null;
     const download = try std.fs.path.join(arena, &.{ linked.folder, download_name });
 
     defer cwd.deleteFile(config.io, download) catch |err| {
         std.log.debug("removing {s}: {t}", .{ download, err });
     };
 
-    try transfer.fetch(config.io, linked.site, made.bytes, download, out);
+    try transfer.fetch(config.io, linked.site, made.bytes, download, out, .{});
 
     const exported = try site_data.scratch_beside(config, linked.folder, "pulled");
     defer cwd.deleteTree(config.io, exported) catch |err| {
