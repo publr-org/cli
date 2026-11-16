@@ -121,8 +121,9 @@ pub fn run(
     // Weighed before the page is drawn: its choice and its bar's parts come from this.
     const size = try transfer.size_of(config.io, config.arena, syncing) orelse transfer.Size{};
     const port = asked.port orelse try (try core.Sites.find(config)).free_port(&core.server.listening);
-    // Asked on the page what comes down, unless the command said (`--media`).
-    const asking = !asked.media_given;
+    // Asked on the page what comes down, unless the command said (`--media`) or the site has
+    // no media files, when everything is all there is.
+    const asking = !asked.media_given and size.media_files > 0;
     var arriving: Arriving = undefined;
 
     try arriving.open(config, publr, release, site.email, port, "cloning", .{

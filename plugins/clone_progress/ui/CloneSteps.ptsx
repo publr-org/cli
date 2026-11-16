@@ -2,6 +2,7 @@ import { Publr } from "publr-jsx";
 import type { ViewCtx } from "@publr/admin/Document.ptsx";
 import { Button } from "@publr/ui/Button.ptsx";
 import { Callout } from "@publr/ui/Callout.ptsx";
+import { ChoiceCard } from "@publr/ui/ChoiceCard.ptsx";
 import { Icon } from "@publr/ui/Icon.ptsx";
 import { Progress } from "@publr/ui/Progress.ptsx";
 import { Text } from "@publr/ui/Text.ptsx";
@@ -23,6 +24,8 @@ type Progressed = {
   database_bytes: number;
   media_files: number;
   media_bytes: number;
+  apps_bytes: number;
+  plugins_bytes: number;
   /** Up, once done: where it is live, and its admin signed in once. */
   address: string;
   admin: string;
@@ -76,10 +79,12 @@ export function CloneSteps({ direction, marks_all, marks_setup, ctx }: CloneStep
     headline: "",
     timer: "00:00:00",
     downloaded: "",
-    /** The two ways to bring the site down, with what each weighs; while choosing. */
+    /** The two ways to bring the site down, what each holds and weighs; while choosing. */
     everything: "",
     setup_only: "",
     choosing: false,
+    /** The card picked so far: `all` or `none` (no media files, placeholders instead). */
+    picked: "all",
     /** The bar's parts, as the clone weighed them: with media and without. */
     layout_all: marks_all ?? [],
     layout_setup: marks_setup ?? [],
@@ -173,11 +178,11 @@ export function CloneSteps({ direction, marks_all, marks_setup, ctx }: CloneStep
     show();
     await chose({ media });
   };
-  const take_all = () => {
-    void choose("all");
+  const pick = (event: Event) => {
+    state.picked = (event.target as HTMLInputElement).value;
   };
-  const take_setup = () => {
-    void choose("none");
+  const pull = () => {
+    void choose(state.picked);
   };
   /** Up, once done: the live site, and its admin signed in once, each in a window of its own. */
   const open_live = () => {
@@ -226,16 +231,15 @@ export function CloneSteps({ direction, marks_all, marks_setup, ctx }: CloneStep
         state.address = found.address;
         state.admin = found.admin;
         if (found.phase === "choosing" && !state.choosing && state.everything === "") {
+          const setup = found.database_bytes + found.apps_bytes + found.plugins_bytes;
           state.choosing = true;
-          state.everything = Publr.t("Everything · {size}", {
-            size: sized(found.database_bytes + found.media_bytes),
+          state.everything = Publr.t("Database, media, plugins and apps · {size}", {
+            size: sized(setup + found.media_bytes),
           });
-          state.setup_only = found.media_files > 0
-            ? Publr.t("Database and setup · {size}, {count} images as placeholders", {
-                size: sized(found.database_bytes),
-                count: `${found.media_files}`,
-              })
-            : Publr.t("Database and setup · {size}", { size: sized(found.database_bytes) });
+          state.setup_only = Publr.t("Database, plugins and apps · {size}. {count} media files come as placeholders.", {
+            size: sized(setup),
+            count: `${found.media_files}`,
+          });
         }
         state.elapsed_ms = found.elapsed_ms;
         if (state.up && found.phase === "done") state.here = true;
@@ -277,26 +281,45 @@ export function CloneSteps({ direction, marks_all, marks_setup, ctx }: CloneStep
             {state.headline}
           </Text>
         </div>
-        <Text as="p" variant="body-sm" tone="muted">
-          {state.timer}
-        </Text>
-      </div>
-      <div hidden={!state.media}>
-        <Progress value={state.percent} max={100} width={state.width} label="" size="lg" marks={state.layout_all} />
-      </div>
-      <div hidden={state.media}>
-        <Progress value={state.percent} max={100} width={state.width} label="" size="lg" marks={state.layout_setup} />
+        {!state.choosing && (
+          <Text as="p" variant="body-sm" tone="muted">
+            {state.timer}
+          </Text>
+        )}
       </div>
       {state.choosing && (
-        <div class="flex flex-col gap-2 sm:flex-row">
-          <Button type="button" hierarchy="primary" size="md" onClick={take_all}>
-            {state.everything}
-          </Button>
-          <Button type="button" hierarchy="secondary" size="md" onClick={take_setup}>
-            {state.setup_only}
-          </Button>
+        <div class="flex flex-col gap-5" data-part="clone-choice">
+          <div class="grid gap-3 sm:grid-cols-2">
+            <ChoiceCard
+              name="media"
+              value="all"
+              checked={state.picked === "all"}
+              title={Publr.t("Everything")}
+              description={state.everything}
+              onChange={pick}
+            />
+            <ChoiceCard
+              name="media"
+              value="none"
+              checked={state.picked === "none"}
+              title={Publr.t("Without media")}
+              description={state.setup_only}
+              onChange={pick}
+            />
+          </div>
+          <div class="flex justify-end">
+            <Button type="button" hierarchy="primary" size="md" onClick={pull}>
+              {Publr.t("Pull")}
+            </Button>
+          </div>
         </div>
       )}
+      <div hidden={state.choosing || !state.media}>
+        <Progress value={state.percent} max={100} width={state.width} label="" size="lg" marks={state.layout_all} />
+      </div>
+      <div hidden={state.choosing || state.media}>
+        <Progress value={state.percent} max={100} width={state.width} label="" size="lg" marks={state.layout_setup} />
+      </div>
       {state.downloaded !== "" && (
         <Text as="p" variant="body-sm" tone="muted">
           {state.downloaded}
