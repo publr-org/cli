@@ -34,6 +34,7 @@ const usage =
     \\  publr new <name>           a new site in the default folder, started, opened
     \\                             --admin-only: no front end, / opens the admin
     \\                             --publr <version>: that release, not the newest
+    \\                             --admin <email> [--admin-name <name>]: its first admin
     \\  publr init [<path>]        that folder made a site, or set up and listed (.: here)
     \\  publr ls [--json]          every site in every listed folder
     \\  publr start <name>...      start sites in the background
@@ -52,6 +53,9 @@ const usage =
     \\                               their pinned releases (one built from source, say)
     \\    config publr --unset [<name>...]
     \\                               back to their pinned releases
+    \\    config admin <email> [--name <name>]
+    \\                               every new site's first admin (else the Cloud account
+    \\                               signed in, else the setup page); --unset forgets it
     \\  publr versions             the Publr releases kept, and which site runs which
     \\    versions use <version> <name>...|--all
     \\
@@ -477,6 +481,12 @@ fn new(
         } else if (std.mem.eql(u8, word, "--publr") and index + 1 < rest.len) {
             index += 1;
             options.publr = rest[index];
+        } else if (std.mem.eql(u8, word, "--admin") and index + 1 < rest.len) {
+            index += 1;
+            options.admin = rest[index];
+        } else if (std.mem.eql(u8, word, "--admin-name") and index + 1 < rest.len) {
+            index += 1;
+            options.admin_name = rest[index];
         } else if (name == null and word.len > 0 and word[0] != '-') {
             name = word;
         } else {
@@ -490,6 +500,13 @@ fn new(
         std.debug.print("publr: a name is lowercase letters, digits and single hyphens, " ++
             "starting with a letter (up to {d})\n", .{core.sites.name_len_max});
         return error.BadName;
+    }
+
+    // No admin given or set for new sites: the Cloud account this computer signed in as.
+    if (options.admin.len == 0 and config.admin.len == 0) {
+        if (try core.credentials.find(init, core.cloud_login.dashboard_default)) |account| {
+            options.admin = account.email;
+        }
     }
 
     var site = try core.project.new(config, chosen, self_path, options);
@@ -518,6 +535,12 @@ fn init_folder(
         } else if (std.mem.eql(u8, word, "--publr") and index + 1 < rest.len) {
             index += 1;
             options.publr = rest[index];
+        } else if (std.mem.eql(u8, word, "--admin") and index + 1 < rest.len) {
+            index += 1;
+            options.admin = rest[index];
+        } else if (std.mem.eql(u8, word, "--admin-name") and index + 1 < rest.len) {
+            index += 1;
+            options.admin_name = rest[index];
         } else if (word.len > 0 and word[0] != '-') {
             given = word;
         } else {
@@ -809,6 +832,7 @@ fn configure(config: *Config, out: *std.Io.Writer, rest: []const []const u8) !vo
         }
 
         try out.print("publr           {s}\n", .{if (config.publr.len > 0) config.publr else "each site's pinned release"});
+        try out.print("admin           {s}\n", .{if (config.admin.len > 0) config.admin else "the Cloud account signed in, else the setup page"});
         try out.print("config          {s}\n", .{try config.path(&.{core.config.file_name})});
         return;
     }
@@ -844,6 +868,20 @@ fn configure(config: *Config, out: *std.Io.Writer, rest: []const []const u8) !vo
             }
 
             return;
+        }
+    } else if (std.mem.eql(u8, rest[0], "admin") and rest.len >= 2) {
+        if (std.mem.eql(u8, rest[1], "--unset") and rest.len == 2) {
+            config.admin = "";
+            config.admin_name = "";
+        } else if (rest.len == 2 or (rest.len == 4 and std.mem.eql(u8, rest[2], "--name"))) {
+            if (std.mem.indexOfScalar(u8, rest[1], '@') == null) {
+                return error.Usage;
+            }
+
+            config.admin = rest[1];
+            config.admin_name = if (rest.len == 4) rest[3] else "";
+        } else {
+            return error.Usage;
         }
     } else if (std.mem.eql(u8, rest[0], "folders") and rest.len == 3) {
         const folder = try core.sites.absolute(config, rest[2]);

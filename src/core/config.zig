@@ -24,6 +24,11 @@ pub const Config = struct {
     /// A Publr every site runs instead of its pinned release (one built from source, say);
     /// empty runs the pins.
     publr: []const u8 = "",
+    /// The first admin every new site gets (`config admin`), unless one is given for it; empty
+    /// leaves it to the Cloud account this computer signed in as, else the setup page.
+    admin: []const u8 = "",
+    /// That admin's name; empty names them by their email.
+    admin_name: []const u8 = "",
     /// `--publr`: the Publr for this call alone, ahead of `publr`; never saved.
     call_publr: []const u8 = "",
 
@@ -62,6 +67,8 @@ pub const Config = struct {
             folder: []const u8 = "",
             folders: []const []const u8 = &.{},
             publr: []const u8 = "",
+            admin: []const u8 = "",
+            admin_name: []const u8 = "",
         };
         var diagnostics: std.zon.parse.Diagnostics = undefined;
         const file = std.zon.parse.fromSlice(File, .{
@@ -81,6 +88,8 @@ pub const Config = struct {
 
         config.folders = file.folders;
         config.publr = file.publr;
+        config.admin = file.admin;
+        config.admin_name = file.admin_name;
 
         return config;
     }
@@ -102,6 +111,8 @@ pub const Config = struct {
 
         try writer.writeAll("    },\n");
         try writer.print("    .publr = \"{f}\",\n", .{std.zig.fmtString(config.publr)});
+        try writer.print("    .admin = \"{f}\",\n", .{std.zig.fmtString(config.admin)});
+        try writer.print("    .admin_name = \"{f}\",\n", .{std.zig.fmtString(config.admin_name)});
         try writer.writeAll("}\n");
 
         try std.Io.Dir.cwd().writeFile(config.io, .{

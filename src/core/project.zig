@@ -19,6 +19,11 @@ pub const Options = struct {
     admin_only: bool = false,
     /// The release to pin; the newest when empty.
     publr: []const u8 = "",
+    /// The site's first admin, ahead of the config's (`config admin`); empty leaves it to the
+    /// config, else to the setup page.
+    admin: []const u8 = "",
+    /// That admin's name; empty names them by their email.
+    admin_name: []const u8 = "",
 };
 
 /// A new project named `name` in the default folder: made, set up, started.
@@ -98,11 +103,33 @@ fn make(
     }
 
     var site = try sites_module.load(config, folder, entry);
+    const publr = try versions.binary_for(config, site);
 
     site.local.created_ms = server.now_ms(config.io);
-    try set_up(config, &site, try versions.binary_for(config, site), self_path);
+    try make_admin(config, &site, publr, options);
+    try set_up(config, &site, publr, self_path);
 
     return site;
+}
+
+/// The site's first admin, chosen for it or by the config, made before it first starts, with a
+/// password of its own nobody types (the command signs them in); none leaves it to the setup page.
+fn make_admin(config: *const Config, site: *Site, publr: []const u8, options: Options) !void {
+    std.debug.assert(publr.len > 0);
+    std.debug.assert(site.folder.len > 0);
+
+    const email = if (options.admin.len > 0) options.admin else config.admin;
+
+    if (email.len == 0) {
+        return;
+    }
+
+    const given_name = if (options.admin.len > 0) options.admin_name else config.admin_name;
+    const name = if (given_name.len > 0) given_name else email[0 .. std.mem.indexOfScalar(u8, email, '@') orelse email.len];
+
+    _ = try run(config, publr, site.folder, &.{ "project", "init", "--email", email, "--display_name", name });
+    site.local.email = email;
+    try sites_module.save(config, site.*);
 }
 
 fn pick(config: *const Config, given: []const u8) ![]const u8 {
@@ -114,7 +141,6 @@ fn pick(config: *const Config, given: []const u8) ![]const u8 {
 }
 
 /// The site's server started, the command trusted as its sign-on issuer, the helper running.
-/// Its first admin is made on Publr's setup page, never here.
 pub fn set_up(config: *const Config, site: *Site, publr: []const u8, self_path: []const u8) !void {
     std.debug.assert(publr.len > 0);
 
