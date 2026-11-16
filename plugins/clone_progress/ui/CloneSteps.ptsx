@@ -41,7 +41,7 @@ export type CloneStepsProps = {
 };
 
 const sized = (bytes: number) =>
-  bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)}\u00a0MB` : `${Math.max(1, Math.round(bytes / 1024))}\u00a0KB`;
 
 const clock = (ms: number) => {
   const seconds = Math.floor(ms / 1000);
@@ -61,7 +61,6 @@ export function CloneSteps({ direction, marks_all, marks_setup, ctx }: CloneStep
     packed_through: 0,
     done_bytes: 0,
     total_bytes: 0,
-    placeholders: 0,
     unpacked_bytes: 0,
     media: true,
     problem: "",
@@ -147,7 +146,7 @@ export function CloneSteps({ direction, marks_all, marks_setup, ctx }: CloneStep
       const part = landing().part;
       return part === "" ? Publr.t("Unpacking it into this folder") : Publr.t("Unpacking {part}", { part: part.toLowerCase() });
     }
-    if (state.phase === "placeholders") return Publr.t("Writing placeholders for media");
+    if (state.phase === "placeholders") return Publr.t("Finishing");
     return Publr.t("Starting it here");
   };
 
@@ -224,7 +223,6 @@ export function CloneSteps({ direction, marks_all, marks_setup, ctx }: CloneStep
         state.packed_through = found.packed_through;
         state.done_bytes = found.done_bytes;
         state.total_bytes = found.total_bytes;
-        state.placeholders = found.placeholders;
         state.unpacked_bytes = found.unpacked_bytes;
         state.media = found.media;
         state.problem = found.problem;
@@ -233,13 +231,10 @@ export function CloneSteps({ direction, marks_all, marks_setup, ctx }: CloneStep
         if (found.phase === "choosing" && !state.choosing && state.everything === "") {
           const setup = found.database_bytes + found.apps_bytes + found.plugins_bytes;
           state.choosing = true;
-          state.everything = Publr.t("Database, media, plugins and apps · {size}", {
+          state.everything = Publr.t("Database, media, plugins, apps · {size}", {
             size: sized(setup + found.media_bytes),
           });
-          state.setup_only = Publr.t("Database, plugins and apps · {size}. {count} media files come as placeholders.", {
-            size: sized(setup),
-            count: `${found.media_files}`,
-          });
+          state.setup_only = Publr.t("Database, plugins, apps · {size}", { size: sized(setup) });
         }
         state.elapsed_ms = found.elapsed_ms;
         if (state.up && found.phase === "done") state.here = true;
@@ -323,13 +318,6 @@ export function CloneSteps({ direction, marks_all, marks_setup, ctx }: CloneStep
       {state.downloaded !== "" && (
         <Text as="p" variant="body-sm" tone="muted">
           {state.downloaded}
-        </Text>
-      )}
-      {!state.media && state.placeholders > 0 && (
-        <Text as="p" variant="body-sm" tone="muted">
-          {Publr.t("{count} placeholders stand in for media; your real files stay on the server.", {
-            count: `${state.placeholders}`,
-          })}
         </Text>
       )}
       {state.here && !state.up && (
