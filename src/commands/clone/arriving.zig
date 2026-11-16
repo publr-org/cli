@@ -203,7 +203,7 @@ pub const Arriving = struct {
         arriving.progress.phase = "choosing";
 
         while (true) {
-            // The page's server gone (its tab closed, Studio quit, another move took over): no
+            // The page's server gone (its tab closed, Desktop quit, another move took over): no
             // one is left to answer.
             if (!core.server.running(arriving.config.io, arriving.site)) {
                 return error.PageClosed;

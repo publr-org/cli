@@ -1,5 +1,5 @@
 //! `publr cloud login`: this computer signed in to the person's Publr Cloud account, as Publr
-//! Studio signs in (`cloud/docs/projects.md`, "Apps signed in to an account"): OAuth with
+//! Desktop signs in (`cloud/docs/projects.md`, "Apps signed in to an account"): OAuth with
 //! PKCE in the browser, back through a one-off listener on 127.0.0.1. The token is kept
 //! with the CLI's others, under the dashboard's address; `cloud deploy` takes it from there.
 const std = @import("std");

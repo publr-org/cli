@@ -51,7 +51,7 @@ const Options = struct {
     name: []const u8 = "",
     dashboard: []const u8 = "",
     /// One JSON line per step on stdout instead of the words, for a program driving it
-    /// (Publr Studio): `{"stage":"packing"}`, `{"stage":"uploading","done":…,"total":…}`,
+    /// (Publr Desktop): `{"stage":"packing"}`, `{"stage":"uploading","done":…,"total":…}`,
     /// `{"stage":"starting"}`, `{"stage":"done","address":…,"admin":…,…}`, or
     /// `{"stage":"failed","error":…,"message":…}`. `{"stage":"page","url":…}` names the
     /// progress page as soon as it is up.

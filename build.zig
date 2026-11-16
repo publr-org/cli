@@ -4,7 +4,7 @@ pub fn build(builder: *std.Build) void {
     const target = builder.standardTargetOptions(.{});
     const optimize = builder.standardOptimizeOption(.{});
 
-    // The core, for Studio: `b.dependency("publr_cli", ...).module("publr_cli")`.
+    // The core, for Desktop: `b.dependency("publr_cli", ...).module("publr_cli")`.
     const core = builder.addModule("publr_cli", .{
         .root_source_file = builder.path("src/core.zig"),
         .target = target,
@@ -102,7 +102,7 @@ fn add_compiler(
     module.addImport("publr_zig", publr_zig.module("publr_zig"));
 }
 
-/// The options rule of Publr's tidy (`STYLE.md`), alone, as `p` and Studio run it.
+/// The options rule of Publr's tidy (`STYLE.md`), alone, as `p` and Desktop run it.
 fn add_tidy(builder: *std.Build) *std.Build.Step {
     const tidy = builder.addExecutable(.{
         .name = "tidy",

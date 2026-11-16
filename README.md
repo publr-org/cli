@@ -19,7 +19,7 @@ cd ~/Publr/shop && publr content list    handed on to the site's Publr
 ```
 
 Install: `brew install publr-org/tap/publr`, `curl -fsSL https://publr.dev/install.sh | sh`,
-or Publr Studio, which carries the same command (Settings → Install `publr` in PATH).
+or Publr Desktop, which carries the same command (Settings → Add Publr to PATH).
 
 Config lives in `~/Library/Application Support/Publr` (macOS) or `~/.config/publr`
 (`$PUBLR_CONFIG` overrides): `config.zon`, the releases kept (`versions/`), the sign-on key
@@ -29,7 +29,7 @@ every local site trusts, the helper's log. Each site keeps what this computer kn
 ## Building
 
 `zig build` (Zig 0.17.0) puts the command in `zig-out/bin/publr`; `zig build test` runs the
-tests and the options rule of Publr's tidy (it reads `../publr/scripts/tidy.zig`). Studio
+tests and the options rule of Publr's tidy (it reads `../publr/scripts/tidy.zig`). Desktop
 links the core as the `publr_cli` module, which carries no compiler.
 
 The command carries Zig's compiler for `plugin build` and `publr zig` (`publr_zig`,

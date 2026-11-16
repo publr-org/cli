@@ -1,4 +1,4 @@
-//! The core both faces share, the `publr` command and Studio: the command's folder and
+//! The core both faces share, the `publr` command and Desktop: the command's folder and
 //! config, the sites in every listed folder, which Publr each runs, their servers, signed-in
 //! links and the helper, and this computer's sign-ins to sites and to Cloud.
 

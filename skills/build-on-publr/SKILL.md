@@ -14,7 +14,7 @@ templates read at runtime, never compiled). It is never a modified core.
 
 1. **Find the site.** Run the `publr` command on the PATH (Homebrew
    `brew install publr-org/tap/publr`, `curl -fsSL https://publr.dev/install.sh | sh`, or the
-   one Publr Studio installs). Never `./publr` or a binary inside a site's folder.
+   one Publr Desktop installs). Never `./publr` or a binary inside a site's folder.
    - A folder with `publr.zon` (or a folder below one) is a site on this computer. Every
      command that is not the `publr` command's own (`new`, `ls`, `start`, `open`, …) goes to
      the Publr release that site runs, in the site's folder: `publr content list` from there

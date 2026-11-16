@@ -44,7 +44,7 @@ const usage =
     \\                             --print: the signed-in link instead (good for a minute, once)
     \\  publr logs [<name>]        the end of the site's server log
     \\  publr rm <name> [--yes]    stop it and move it to its folder's .trash
-    \\  publr studio [<name>]      Studio opened
+    \\  publr desktop [<name>]     Publr Desktop opened
     \\  publr config               where sites go and which folders hold them
     \\    config folder <path>       the default folder
     \\    config folders add|remove <path>
@@ -112,7 +112,7 @@ pub const Command = enum {
     open,
     logs,
     rm,
-    studio,
+    desktop,
     config,
     versions,
     helper,
@@ -196,7 +196,7 @@ fn run(init: std.process.Init) !u8 {
         .open => try open(init, &config, out, rest, self_path),
         .logs => try logs(&config, out, rest),
         .rm => try remove(init, &config, out, rest),
-        .studio => try studio(init, &config, rest),
+        .desktop => try desktop(init, &config, rest),
         .config => try configure(&config, out, rest),
         .versions => try versions_command(&config, out, rest),
         .helper => try core.helper.serve(init),
@@ -795,20 +795,20 @@ fn confirmed(init: std.process.Init, name: []const u8, trash: []const u8) !bool 
     return std.ascii.eqlIgnoreCase(answer, "y") or std.ascii.eqlIgnoreCase(answer, "yes");
 }
 
-/// Studio opened, on a site when one is named.
-fn studio(init: std.process.Init, config: *const Config, rest: []const []const u8) !void {
+/// Publr Desktop opened, on a site when one is named.
+fn desktop(init: std.process.Init, config: *const Config, rest: []const []const u8) !void {
     if (rest.len > 1) {
         return error.Usage;
     }
 
     if (builtin.os.tag != .macos) {
-        std.debug.print("publr: Studio is for macOS for now\n", .{});
-        return error.NoStudio;
+        std.debug.print("publr: Publr Desktop is for macOS for now\n", .{});
+        return error.NoDesktop;
     }
 
     var argv: std.ArrayList([]const u8) = .empty;
 
-    try argv.appendSlice(config.arena, &.{ "open", "-a", "Publr Studio" });
+    try argv.appendSlice(config.arena, &.{ "open", "-a", "Publr Desktop" });
 
     if (rest.len == 1) {
         const site = try one(config, rest[0]);

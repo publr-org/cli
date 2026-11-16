@@ -2,7 +2,7 @@
 //! the database when the site moved past what the folder took, and of the media only the
 //! files the folder does not hold the same. It never touches the folder's own work: a folder
 //! with changes not pushed, or pushed and still waiting for review, is left as it is.
-//! `--check` only says where the folder is, as JSON, for Publr Studio; it also moves the
+//! `--check` only says where the folder is, as JSON, for Publr Desktop; it also moves the
 //! folder's release pin when the site runs another release.
 
 const std = @import("std");
@@ -25,7 +25,7 @@ const list_path = "/api/environments.list";
 const activity_path = "/api/activity.list";
 const walk_entries_max: u32 = 1 << 24;
 
-/// Exit codes Studio tells apart: signed out of the site, work of the folder's own in the
+/// Exit codes Desktop tells apart: signed out of the site, work of the folder's own in the
 /// way, a server running in the folder.
 pub const signed_out: u8 = 3;
 pub const own_work: u8 = 4;
@@ -565,7 +565,7 @@ fn remove_gone_media(config: *const Config, publr: []const u8, folder: []const u
     }
 }
 
-test "where a folder is reads as Studio reads it" {
+test "where a folder is reads as Desktop reads it" {
     const where: Where = .{
         .changes = true,
         .unsent = false,
