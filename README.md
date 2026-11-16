@@ -19,7 +19,7 @@ cd ~/Publr/shop && publr content list    handed on to the site's Publr
 ```
 
 Install: `brew install publr-org/tap/publr`, `curl -fsSL https://publr.dev/install.sh | sh`,
-or Publr Desktop, which carries the same command (Settings → Add Publr to PATH).
+or Publr Desktop, which carries the same command and puts it on the PATH when it starts.
 
 Config lives in `~/Library/Application Support/Publr` (macOS) or `~/.config/publr`
 (`$PUBLR_CONFIG` overrides): `config.zon`, the releases kept (`versions/`), the sign-on key
