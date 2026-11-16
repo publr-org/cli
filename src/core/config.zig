@@ -24,8 +24,8 @@ pub const Config = struct {
     /// A Publr every site runs instead of its pinned release (one built from source, say);
     /// empty runs the pins.
     publr: []const u8 = "",
-    /// The first admin every new site gets (`config admin`), unless one is given for it; empty
-    /// leaves it to the Cloud account this computer signed in as, else the setup page.
+    /// The default account email (`config admin`): every new site's first admin, unless one is
+    /// given for it; empty leaves it to the site's setup page.
     admin: []const u8 = "",
     /// That admin's name; empty names them by their email.
     admin_name: []const u8 = "",
