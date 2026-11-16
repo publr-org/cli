@@ -200,6 +200,8 @@ export function CloneSteps({ direction, marks_all, marks_setup, ctx }: CloneStep
       if (answered === undefined && !unreached(read.error)) {
         state.here = true;
         show();
+        // The site is in its folder and answering: on into its admin.
+        ctx.navigate("/admin");
         return;
       }
       await new Promise((resolve) => window.setTimeout(resolve, 500));
@@ -319,13 +321,6 @@ export function CloneSteps({ direction, marks_all, marks_setup, ctx }: CloneStep
         <Text as="p" variant="body-sm" tone="muted">
           {state.downloaded}
         </Text>
-      )}
-      {state.here && !state.up && (
-        <div class="flex justify-end">
-          <Button href="/admin" hierarchy="primary" size="md">
-            {Publr.t("Open your site")}
-          </Button>
-        </div>
       )}
       {state.here && state.up && (
         <div class="flex justify-end gap-2">
