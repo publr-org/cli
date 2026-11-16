@@ -180,3 +180,15 @@ jobs:
           git add Formula/publr.rb
           git commit -qm "publr $VERSION"
           git push -q origin HEAD
+
+      # publr.dev/install.sh is served from the `publr-dev` R2 bucket (cloud/install).
+      - name: Put the installer on publr.dev
+        working-directory: dist
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          aws s3 cp install.sh s3://publr-dev/install.sh \
+            --endpoint-url https://7f3d3c3608d0f7085ffef31cff24b964.r2.cloudflarestorage.com \
+            --content-type "text/plain; charset=utf-8"
