@@ -55,7 +55,7 @@ const usage =
     \\                               back to their pinned releases
     \\    config admin <email> [--name <name>]
     \\                               the default account email: every new site's first admin
-    \\                               (not set: the setup page makes it); --unset forgets it
+    \\                               (not set: the Cloud account, else the setup page); --unset
     \\  publr versions             the Publr releases kept, and which site runs which
     \\    versions use <version> <name>...|--all
     \\
@@ -502,6 +502,13 @@ fn new(
         return error.BadName;
     }
 
+    // No default account email set: the Cloud account this computer signed in as.
+    if (options.admin.len == 0 and config.admin.len == 0) {
+        if (try core.credentials.find(init, core.cloud_login.dashboard_default)) |account| {
+            options.admin = account.email;
+        }
+    }
+
     var site = try core.project.new(config, chosen, self_path, options);
 
     try out.print("created {s} in {s}\n", .{ site.name, site.folder });
@@ -825,7 +832,7 @@ fn configure(config: *Config, out: *std.Io.Writer, rest: []const []const u8) !vo
         }
 
         try out.print("publr           {s}\n", .{if (config.publr.len > 0) config.publr else "each site's pinned release"});
-        try out.print("admin           {s}\n", .{if (config.admin.len > 0) config.admin else "not set: the setup page makes it"});
+        try out.print("admin           {s}\n", .{if (config.admin.len > 0) config.admin else "not set: the Cloud account signed in, else the setup page"});
         try out.print("config          {s}\n", .{try config.path(&.{core.config.file_name})});
         return;
     }

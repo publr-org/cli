@@ -25,7 +25,7 @@ pub const Config = struct {
     /// empty runs the pins.
     publr: []const u8 = "",
     /// The default account email (`config admin`): every new site's first admin, unless one is
-    /// given for it; empty leaves it to the site's setup page.
+    /// given for it; empty: the Cloud account signed in, else the site's setup page.
     admin: []const u8 = "",
     /// That admin's name; empty names them by their email.
     admin_name: []const u8 = "",
