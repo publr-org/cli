@@ -71,6 +71,7 @@ pub const Arriving = struct {
         std.debug.assert(port > 0);
         std.debug.assert(email.len > 0);
 
+        const page = try page_publr(config, publr, release);
         const name = try std.fmt.allocPrint(config.arena, "{s}-{s}", .{ progress.name, doing });
         const folder = try config.path(&.{ core.sites.clones_folder, name });
         const cwd = std.Io.Dir.cwd();
@@ -84,13 +85,13 @@ pub const Arriving = struct {
             .sub_path = try std.fs.path.join(config.arena, &.{ folder, core.sites.project_file }),
             .data = try std.fmt.allocPrint(config.arena, ".{{\n    .name = \"{s}\",\n    .publr = \"{s}\",\n}}\n", .{
                 name,
-                release,
+                page.release,
             }),
         });
 
         arriving.* = .{
             .config = config,
-            .publr = publr,
+            .publr = page.publr,
             .site = try core.sites.load(config, folder, folder),
             .progress = progress,
             .began_ms = core.server.now_ms(config.io),
@@ -99,17 +100,17 @@ pub const Arriving = struct {
         arriving.site.local.email = email;
         try core.sites.save(config, arriving.site);
 
-        _ = try core.project.run(config, publr, folder, &.{
+        _ = try core.project.run(config, page.publr, folder, &.{
             "project", "init", "--email", email, "--display_name", "Admin",
         });
 
-        const plugin = try module_of(config, publr, release, folder);
+        const plugin = try module_of(config, page.publr, page.release, folder);
 
-        try core.server.start_with(config, &arriving.site, publr, &.{ "--plugin", plugin });
+        try core.server.start_with(config, &arriving.site, page.publr, &.{ "--plugin", plugin });
 
         const key = try core.sign_on.public_key_hex(config);
 
-        _ = try core.project.run(config, publr, folder, &.{
+        _ = try core.project.run(config, page.publr, folder, &.{
             "--as-admin",   "sign_on", "configure",  "--issuer", core.sign_on.issuer,
             "--public_key", &key,      "--audience", name,
         });
@@ -226,6 +227,42 @@ pub const Arriving = struct {
         };
     }
 };
+
+const PagePublr = struct {
+    publr: []const u8,
+    release: []const u8,
+};
+
+/// The Publr the page runs: the command's own screen, so the newest release, whatever the
+/// site that moves runs (an older one may not build the plugin the command carries); the
+/// Publr chosen for every site when there is one.
+fn page_publr(config: *const Config, publr: []const u8, release: []const u8) !PagePublr {
+    std.debug.assert(publr.len > 0);
+    std.debug.assert(release.len > 0);
+
+    if (versions.chosen_for_all(config) != null) {
+        return .{
+            .publr = publr,
+            .release = release,
+        };
+    }
+
+    const newest = try versions.newest(config);
+    const site_version = std.SemanticVersion.parse(release) catch return error.NotARelease;
+    const newest_version = std.SemanticVersion.parse(newest) catch return error.NotARelease;
+
+    if (newest_version.order(site_version) != .gt) {
+        return .{
+            .publr = publr,
+            .release = release,
+        };
+    }
+
+    return .{
+        .publr = try versions.kept(config, newest),
+        .release = newest,
+    };
+}
 
 /// The plugin's source the command carries, as one number.
 fn source_hash() u64 {
