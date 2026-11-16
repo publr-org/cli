@@ -152,7 +152,11 @@ pub fn run(
     if (asking) {
         try out.writeAll("Choose on that page what comes down (or run again with --media all|none).\n");
         try out.flush();
-        media = try arriving.wait_for_choice();
+        media = arriving.wait_for_choice() catch |err| {
+            arriving.close();
+            std.debug.print("publr clone: {s}\n", .{stopped_because(err)});
+            return 1;
+        };
     }
 
     const latest = bring_down(config, out, syncing, publr, folder, media, &arriving) catch |err| {
@@ -443,6 +447,7 @@ fn stopped_because(err: anyerror) []const u8 {
         error.ConnectionRefused => "the site did not answer. Is it running?",
         error.ShortDownload, error.DownloadRefused => "the download broke off. Try again.",
         error.PublrFailed => "Publr could not take the site in; it said why above.",
+        error.PageClosed => "the page closed before anything was chosen.",
         else => @errorName(err),
     };
 }

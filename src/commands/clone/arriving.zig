@@ -72,7 +72,8 @@ pub const Arriving = struct {
         std.debug.assert(email.len > 0);
 
         const page = try page_publr(config, publr, release);
-        const name = try std.fmt.allocPrint(config.arena, "{s}-{s}", .{ progress.name, doing });
+        // Its port in the name: two moves of one site never share a page.
+        const name = try std.fmt.allocPrint(config.arena, "{s}-{s}-{d}", .{ progress.name, doing, port });
         const folder = try config.path(&.{ core.sites.clones_folder, name });
         const cwd = std.Io.Dir.cwd();
 
@@ -202,6 +203,12 @@ pub const Arriving = struct {
         arriving.progress.phase = "choosing";
 
         while (true) {
+            // The page's server gone (its tab closed, Studio quit, another move took over): no
+            // one is left to answer.
+            if (!core.server.running(arriving.config.io, arriving.site)) {
+                return error.PageClosed;
+            }
+
             const chosen = try arriving.feed(true);
 
             if (chosen.len > 0) {
