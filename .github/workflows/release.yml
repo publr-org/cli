@@ -91,8 +91,9 @@ jobs:
       - name: Write the version
         working-directory: cli
         run: &write_version |
-          sed -i -E "s/^( *\.version = \")[0-9]+\.[0-9]+\.[0-9]+(\",)$/\1$VERSION\2/" build.zig.zon
-          sed -i -E "s/^(pub const version = \")[0-9]+\.[0-9]+\.[0-9]+(\";)$/\1$VERSION\2/" src/main.zig
+          sed -i.bak -E "s/^( *\.version = \")[0-9]+\.[0-9]+\.[0-9]+(\",)$/\1$VERSION\2/" build.zig.zon
+          sed -i.bak -E "s/^(pub const version = \")[0-9]+\.[0-9]+\.[0-9]+(\";)$/\1$VERSION\2/" src/main.zig
+          rm build.zig.zon.bak src/main.zig.bak
           grep -q "\"$VERSION\"" build.zig.zon && grep -q "\"$VERSION\"" src/main.zig
 
       - name: zig build
