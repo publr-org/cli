@@ -126,7 +126,7 @@ pub fn run(
     else if (around) |folder|
         try versions.binary_for(config, try core.sites.load(config, folder, folder))
     else
-        try versions.kept(config, try newest_kept(config));
+        versions.chosen_for_all(config) orelse try versions.kept(config, try newest_kept(config));
     const runs_in = if (address == null and around != null)
         around.?
     else
