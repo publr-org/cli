@@ -3,6 +3,7 @@
 //! the recorded pid is only how it is stopped.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const config_module = @import("config.zig");
 const sites_module = @import("sites.zig");
 
@@ -118,7 +119,8 @@ pub fn start_with(config: *const Config, site: *Site, publr: []const u8, more: [
         .pgid = 0,
     });
 
-    site.local.pid = child.id orelse 0;
+    // A browser (the web build of Desktop) has no process ids.
+    site.local.pid = if (builtin.os.tag == .wasi) 0 else child.id orelse 0;
     try sites_module.save(config, site.*);
 
     if (!try wait(config.io, site.local.port, true, start_wait_ms)) {
@@ -148,12 +150,14 @@ pub fn stop(config: *const Config, site: *Site) !void {
         return;
     }
 
-    if (site.local.pid > 0) {
-        signal(site.local.pid, std.posix.SIG.TERM);
+    if (builtin.os.tag != .wasi) {
+        if (site.local.pid > 0) {
+            signal(site.local.pid, std.posix.SIG.TERM);
 
-        if (!try wait(config.io, site.local.port, false, stop_wait_ms)) {
-            signal(site.local.pid, std.posix.SIG.KILL);
-            _ = try wait(config.io, site.local.port, false, stop_wait_ms);
+            if (!try wait(config.io, site.local.port, false, stop_wait_ms)) {
+                signal(site.local.pid, std.posix.SIG.KILL);
+                _ = try wait(config.io, site.local.port, false, stop_wait_ms);
+            }
         }
     }
 
