@@ -3,6 +3,7 @@
 //! the recorded pid is only how it is stopped.
 
 const std = @import("std");
+const skill = @import("skill.zig");
 const builtin = @import("builtin");
 const config_module = @import("config.zig");
 const sites_module = @import("sites.zig");
@@ -89,6 +90,11 @@ pub fn start_with(config: *const Config, site: *Site, publr: []const u8, more: [
 
     const arena = config.arena;
     const own = try std.fs.path.join(arena, &.{ site.folder, sites_module.own_folder });
+
+    // An agent opened in the folder finds how to build on Publr, as this command has it.
+    skill.write_into(config.io, arena, site.folder) catch |err| {
+        std.log.warn("writing the skill into {s}: {t}", .{ site.folder, err });
+    };
 
     try std.Io.Dir.cwd().createDirPath(config.io, own);
 

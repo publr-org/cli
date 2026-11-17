@@ -4,8 +4,9 @@
 //! the folder, where agents that load skills find it: the Agent Skills folder most read
 //! (`.agents/skills`) and Claude Code's, or the one agent named.
 const std = @import("std");
+const skill = @import("../core.zig").skill;
 
-const skill_name = "build-on-publr";
+const skill_name = skill.name;
 
 /// Where each agent reads a folder's skills from.
 const agents = [_]struct {
@@ -30,35 +31,17 @@ const agents = [_]struct {
     },
 };
 
-/// With no agent named: the shared Agent Skills folder (Codex, Cursor, Pi and others read
-/// it) and Claude Code's, which reads only its own.
-const dirs_default = [_][]const u8{ ".agents/skills/" ++ skill_name, agents[0].dir };
-
 const usage =
     \\usage: publr skill
     \\       publr skill install [--agent claude|codex|cursor|pi | --dir <path>]
     \\
 ;
 
-const files = [_]struct {
-    path: []const u8,
-    text: []const u8,
-}{
-    .{
-        .path = "SKILL.md",
-        .text = @embedFile("skill"),
-    },
-    .{
-        .path = "references/core-changes.md",
-        .text = @embedFile("skill_core_changes"),
-    },
-};
-
 pub fn run(init: std.process.Init, out: *std.Io.Writer, args: []const []const u8) !u8 {
-    std.debug.assert(files.len > 0);
+    std.debug.assert(skill.files.len > 0);
 
     if (args.len == 0) {
-        try out.writeAll(files[0].text);
+        try out.writeAll(skill.files[0].text);
         return 0;
     }
 
@@ -67,14 +50,14 @@ pub fn run(init: std.process.Init, out: *std.Io.Writer, args: []const []const u8
         return 2;
     }
 
-    const named = if (args.len == 3) dirs_of(args[1..]) else &dirs_default;
+    const named = if (args.len == 3) dirs_of(args[1..]) else &skill.dirs_default;
     const dirs = named orelse {
         std.debug.print(usage, .{});
         return 2;
     };
 
     for (dirs) |dir| {
-        try write_files(init, dir);
+        try skill.write(init.io, dir);
         try out.print("{s} written to {s}/\n", .{ skill_name, dir });
     }
 
@@ -105,28 +88,6 @@ fn dirs_of(flag: []const []const u8) ?[]const []const u8 {
     }
 
     return null;
-}
-
-fn write_files(init: std.process.Init, dir: []const u8) !void {
-    std.debug.assert(dir.len > 0);
-
-    const cwd = std.Io.Dir.cwd();
-
-    try cwd.createDirPath(init.io, dir);
-
-    var root = try cwd.openDir(init.io, dir, .{});
-    defer root.close(init.io);
-
-    for (files) |file| {
-        if (std.fs.path.dirname(file.path)) |sub| {
-            try root.createDirPath(init.io, sub);
-        }
-
-        try root.writeFile(init.io, .{
-            .sub_path = file.path,
-            .data = file.text,
-        });
-    }
 }
 
 test "an agent named gets its own folder, and nothing else is taken" {

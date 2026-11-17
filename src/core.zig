@@ -18,6 +18,7 @@ pub const site_data = @import("core/site_data.zig");
 pub const transfer = @import("core/transfer.zig");
 pub const links = @import("core/links.zig");
 pub const changes = @import("core/changes.zig");
+pub const skill = @import("core/skill.zig");
 
 pub const Config = config.Config;
 pub const Site = sites.Site;

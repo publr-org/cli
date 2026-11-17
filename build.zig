@@ -15,10 +15,15 @@ pub fn build(builder: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    // The build-on-publr skill `publr skill` writes, from `skills/`.
-    module.addAnonymousImport("skill", .{
-        .root_source_file = builder.path("skills/build-on-publr/SKILL.md"),
-    });
+    // The build-on-publr skill each site's folder gets, from `skills/`.
+    for ([_]*std.Build.Module{ core, module }) |holder| {
+        holder.addAnonymousImport("skill", .{
+            .root_source_file = builder.path("skills/build-on-publr/SKILL.md"),
+        });
+        holder.addAnonymousImport("skill_core_changes", .{
+            .root_source_file = builder.path("skills/build-on-publr/references/core-changes.md"),
+        });
+    }
     // The clone's progress page, a plugin `publr clone` builds for the site's release.
     module.addAnonymousImport("clone_progress_main", .{
         .root_source_file = builder.path("plugins/clone_progress/main.zig"),
@@ -28,9 +33,6 @@ pub fn build(builder: *std.Build) void {
     });
     module.addAnonymousImport("clone_progress_steps", .{
         .root_source_file = builder.path("plugins/clone_progress/ui/CloneSteps.ptsx"),
-    });
-    module.addAnonymousImport("skill_core_changes", .{
-        .root_source_file = builder.path("skills/build-on-publr/references/core-changes.md"),
     });
 
     add_compiler(builder, module, target, optimize);
