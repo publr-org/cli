@@ -488,6 +488,10 @@ fn link(local: *Local, init: std.process.Init, id: Value, params: Value) !void {
     };
 
     try folder_module.link(init.io, arena, local.start, address);
+    // The folder's agent finds how to build on Publr, as a site's own folder does.
+    core.skill.write_into(init.io, arena, local.start) catch |err| {
+        std.log.warn("writing the skill into {s}: {t}", .{ local.start, err });
+    };
 
     const text = switch (outcome) {
         .token => try std.fmt.allocPrint(arena, "This folder ({s}) now works on {s}.", .{
