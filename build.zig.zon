@@ -1,6 +1,6 @@
 .{
     .name = .publr_cli,
-    .version = "0.1.1",
+    .version = "0.2.0",
     .fingerprint = 0x36cefe17303bd63f,
     .minimum_zig_version = "0.17.0",
     .dependencies = .{

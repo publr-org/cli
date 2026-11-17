@@ -26,7 +26,7 @@ const Sites = core.Sites;
 const server = core.server;
 const versions = core.versions;
 
-pub const version = "0.1.1";
+pub const version = "0.2.0";
 
 const usage =
     \\publr: Publr sites on this computer and on Cloud
