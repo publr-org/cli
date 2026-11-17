@@ -15,7 +15,7 @@ const opener: []const u8 = switch (builtin.os.tag) {
 };
 
 const usage =
-    \\usage: publr setup cursor|claude|codex
+    \\usage: publr setup cursor|claude|codex|vscode
     \\
     \\Adds Publr to that tool for every project: open a project's folder there and ask. The
     \\first time in a folder, the agent asks which site it is for; your browser opens on that
@@ -27,6 +27,7 @@ pub const Tool = enum {
     cursor,
     claude,
     codex,
+    vscode,
 };
 
 pub fn run(init: std.process.Init, out: *std.Io.Writer, args: []const []const u8) !u8 {
@@ -51,6 +52,7 @@ pub fn run(init: std.process.Init, out: *std.Io.Writer, args: []const []const u8
 
     return switch (chosen) {
         .cursor => cursor(init, out, binary),
+        .vscode => vscode(init, out, binary),
         .claude, .codex => command(init, out, try steps_for(arena, chosen, binary)),
     };
 }
@@ -58,10 +60,10 @@ pub fn run(init: std.process.Init, out: *std.Io.Writer, args: []const []const u8
 /// The tool's own commands that add `<binary> mcp` to it, after taking any older entry away.
 pub fn steps_for(arena: std.mem.Allocator, tool: Tool, binary: []const u8) !Steps {
     std.debug.assert(binary.len > 0);
-    std.debug.assert(tool != .cursor);
+    std.debug.assert(tool != .cursor and tool != .vscode);
 
     return switch (tool) {
-        .cursor => unreachable,
+        .cursor, .vscode => unreachable,
         .claude => .{
             .remove = &.{ "claude", "mcp", "remove", "--scope", "user", "publr" },
             .add = try arena.dupe([]const u8, &.{ "claude", "mcp", "add", "--scope", "user", "publr", "--", binary, "mcp" }),
@@ -94,6 +96,33 @@ fn cursor(init: std.process.Init, out: *std.Io.Writer, binary: []const u8) !u8 {
         "folder in Cursor and ask.\n");
 
     return 0;
+}
+
+/// VS Code's own `--add-mcp`, for every folder: each window's folder passed as `--folder`.
+/// `code` on the PATH, else the one inside the app.
+fn vscode(init: std.process.Init, out: *std.Io.Writer, binary: []const u8) !u8 {
+    std.debug.assert(binary.len > 0);
+
+    const arena = init.arena.allocator();
+    const definition = try std.json.Stringify.valueAlloc(arena, .{
+        .name = "publr",
+        .type = "stdio",
+        .command = binary,
+        .args = .{ "mcp", "--folder", "${workspaceFolder}" },
+    }, .{});
+    const in_app = "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code";
+
+    for ([_][]const u8{ "code", in_app }) |code| {
+        if (spawn_ok(init, &.{ code, "--add-mcp", definition }, .ignore)) {
+            try out.writeAll("Added to VS Code for every folder, as publr. Open a project's " ++
+                "folder in VS Code and ask in its chat, in Agent mode.\n");
+            return 0;
+        }
+    }
+
+    std.debug.print("publr setup: VS Code's `code --add-mcp` failed; is VS Code installed?\n", .{});
+
+    return 1;
 }
 
 pub fn cursor_link(arena: std.mem.Allocator, binary: []const u8) ![]const u8 {
