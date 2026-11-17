@@ -62,6 +62,17 @@ pub fn stopped(arena: std.mem.Allocator, folder: []const u8) ![]const u8 {
         "then ask again.", .{folder});
 }
 
+pub fn copy(arena: std.mem.Allocator, folder: []const u8, project: []const u8) ![]const u8 {
+    std.debug.assert(folder.len > 0);
+    std.debug.assert(project.len > 0);
+
+    return std.fmt.allocPrint(arena, "The open folder ({s}) is a copy of the Publr Cloud " ++
+        "project {s}, brought down to this computer. This server works on that project " ++
+        "itself, never on the copy: its files and publr commands run in it change only the " ++
+        "copy, which no one sees. Do every change through the `run` tool, in a branch, " ++
+        "as `setup` and `guide` say, and end with the branch's merge link.", .{ folder, project });
+}
+
 pub fn bad_link(arena: std.mem.Allocator, address: []const u8) ![]const u8 {
     std.debug.assert(address.len <= 64 << 10);
 

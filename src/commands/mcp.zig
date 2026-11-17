@@ -199,7 +199,7 @@ fn dispatch(local: *Local, init: std.process.Init, asked: Asked, method: []const
     std.debug.assert(method.len > 0);
 
     if (eql(method, "initialize")) {
-        return initialize(local, asked.id, asked.message);
+        return initialize(local, init, asked.id, asked.message);
     }
 
     if (eql(method, "ping")) {
@@ -217,7 +217,7 @@ fn dispatch(local: *Local, init: std.process.Init, asked: Asked, method: []const
     return reply_error(local.out, asked.id, -32601, "Method not found");
 }
 
-fn initialize(local: *Local, id: Value, message: Value) !void {
+fn initialize(local: *Local, init: std.process.Init, id: Value, message: Value) !void {
     std.debug.assert(message == .object);
 
     const params = message.object.get("params") orelse Value.null;
@@ -244,7 +244,25 @@ fn initialize(local: *Local, id: Value, message: Value) !void {
             .name = "publr",
             .version = version,
         },
-        .instructions = instructions,
+        .instructions = try instructions_for(init, local.start),
+    });
+}
+
+/// The instructions, and in a copy of a Cloud project, what the copy is: its files look like
+/// the project's, and an agent editing them changes nothing anyone sees.
+fn instructions_for(init: std.process.Init, start: []const u8) ![]const u8 {
+    std.debug.assert(start.len > 0);
+
+    const arena = init.arena.allocator();
+    const found = folder_module.find(init.io, arena, start) catch return instructions;
+
+    if (found != .copy) {
+        return instructions;
+    }
+
+    return std.fmt.allocPrint(arena, "{s}\n\n{s}", .{
+        instructions,
+        try texts.copy(arena, found.copy.folder, found.copy.address),
     });
 }
 
@@ -367,7 +385,7 @@ fn reach(local: *Local, init: std.process.Init, ask: bool) !Reach {
 
     const arena = init.arena.allocator();
     const named = switch (try folder_module.find(init.io, arena, local.start)) {
-        .linked, .serving => |found| found.address,
+        .linked, .copy, .serving => |found| found.address,
         .stopped => |found| started(init, found.folder) orelse return .{
             .says = try texts.stopped(arena, found.folder),
         },

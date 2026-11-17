@@ -1,10 +1,12 @@
-//! The site a folder works on, for `publr mcp`: the one its `.publr/site` names, else the
-//! site it is (`data/publr.db`) through the server running it. Looked for in the folder and
-//! the folders above it, as an agent may start in a subfolder of its project.
+//! The site a folder works on, for `publr mcp`: the one its `.publr/site` names; for a copy
+//! of a Cloud project brought down to this computer, that project; else the site it is
+//! (`data/publr.db`) through the server running it. Looked for in the folder and the folders
+//! above it, as an agent may start in a subfolder of its project.
 const std = @import("std");
 const core = @import("../../core.zig");
 
 const credentials = core.credentials;
+const links = core.links;
 
 pub const database_path = "data/publr.db";
 const depth_max: u32 = 32;
@@ -13,6 +15,9 @@ const site_bytes_max: u32 = 512;
 pub const Target = union(enum) {
     /// A site elsewhere, named by `.publr/site` in `folder`.
     linked: Found,
+    /// A copy of the Cloud project at `address`: work goes to the project, never the copy,
+    /// whose changes no one sees until they are sent up.
+    copy: Found,
     /// This folder is a site and its server runs: the admin's origin.
     serving: Found,
     /// This folder is a site and nothing serves it, or a server too old to say its admin.
@@ -56,6 +61,15 @@ pub fn find(io: std.Io, arena: std.mem.Allocator, start: []const u8) !Target {
         if (try site_named(io, arena, folder)) |address| {
             return .{
                 .linked = .{
+                    .folder = folder,
+                    .address = address,
+                },
+            };
+        }
+
+        if (try copy_of(io, arena, folder)) |address| {
+            return .{
+                .copy = .{
                     .folder = folder,
                     .address = address,
                 },
@@ -127,6 +141,56 @@ fn site_named(io: std.Io, arena: std.mem.Allocator, folder: []const u8) !?[]cons
     const site = std.mem.trim(u8, text, " \n\r\t");
 
     return if (site.len > 0) site else null;
+}
+
+/// The project a copy came from: `.publr/clone.json`'s site, or for a folder deployed and
+/// not yet linked, `cloud.json`'s address. Null for a folder that is no copy.
+fn copy_of(io: std.Io, arena: std.mem.Allocator, folder: []const u8) !?[]const u8 {
+    std.debug.assert(folder.len > 0);
+
+    const Clone = struct {
+        site: []const u8 = "",
+    };
+    const Deployed = struct {
+        address: []const u8 = "",
+    };
+
+    if (try read_json(Clone, io, arena, folder, links.clone_path)) |clone| {
+        if (clone.site.len > 0) {
+            return std.mem.trimEnd(u8, clone.site, "/");
+        }
+    }
+
+    const deployed = try read_json(Deployed, io, arena, folder, links.cloud_name) orelse {
+        return null;
+    };
+
+    return if (deployed.address.len > 0) std.mem.trimEnd(u8, deployed.address, "/") else null;
+}
+
+fn read_json(
+    comptime Shape: type,
+    io: std.Io,
+    arena: std.mem.Allocator,
+    folder: []const u8,
+    name: []const u8,
+) !?Shape {
+    std.debug.assert(folder.len > 0);
+    std.debug.assert(name.len > 0);
+
+    const path = try std.fs.path.join(arena, &.{ folder, name });
+    const limit: std.Io.Limit = .limited(64 << 10);
+    const text = std.Io.Dir.cwd().readFileAlloc(io, path, arena, limit) catch |err| {
+        return switch (err) {
+            error.FileNotFound, error.NotDir => null,
+            else => err,
+        };
+    };
+
+    return std.json.parseFromSliceLeaky(Shape, arena, text, .{
+        .ignore_unknown_fields = true,
+        .allocate = .alloc_always,
+    }) catch null;
 }
 
 /// The admin's origin a running server left beside its database (`publr.db.serve`:
@@ -209,4 +273,41 @@ test "a folder that is a site is never linked elsewhere, and says when nothing s
         try start_folder(io, arena, "/somewhere"),
     );
     try std.testing.expect((try start_folder(io, arena, "${workspaceFolder}")).len > 0);
+}
+
+test "a copy of a Cloud project works on the project, not on itself" {
+    var scratch = std.testing.tmpDir(.{});
+    defer scratch.cleanup();
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    const arena = arena_state.allocator();
+    const io = std.testing.io;
+    const root = try scratch.dir.realPathFileAlloc(io, ".", arena);
+
+    try scratch.dir.createDirPath(io, ".publr");
+    try scratch.dir.createDirPath(io, "data");
+    try scratch.dir.writeFile(io, .{
+        .sub_path = database_path,
+        .data = "",
+    });
+    try scratch.dir.writeFile(io, .{
+        .sub_path = links.cloud_name,
+        .data = "{\"address\":\"https://shop.publr.app/\"}",
+    });
+    const deployed = try find(io, arena, root);
+
+    try std.testing.expectEqualStrings("https://shop.publr.app", deployed.copy.address);
+
+    try scratch.dir.writeFile(io, .{
+        .sub_path = links.clone_path,
+        .data = "{\"site\":\"https://cafe.publr.app\",\"branch\":\"work-abcdef\"}",
+    });
+
+    const below = try std.fs.path.join(arena, &.{ root, "apps" });
+
+    const cloned = try find(io, arena, below);
+
+    try std.testing.expectEqualStrings("https://cafe.publr.app", cloned.copy.address);
 }
