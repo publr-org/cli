@@ -29,6 +29,9 @@ pub const Config = struct {
     admin: []const u8 = "",
     /// That admin's name; empty names them by their email.
     admin_name: []const u8 = "",
+    /// The default language (`config language`, `pl`): every new site's, its admin speaking it
+    /// from the start; empty keeps English.
+    language: []const u8 = "",
     /// `--publr`: the Publr for this call alone, ahead of `publr`; never saved.
     call_publr: []const u8 = "",
 
@@ -69,6 +72,7 @@ pub const Config = struct {
             publr: []const u8 = "",
             admin: []const u8 = "",
             admin_name: []const u8 = "",
+            language: []const u8 = "",
         };
         var diagnostics: std.zon.parse.Diagnostics = undefined;
         const file = std.zon.parse.fromSlice(File, .{
@@ -90,6 +94,7 @@ pub const Config = struct {
         config.publr = file.publr;
         config.admin = file.admin;
         config.admin_name = file.admin_name;
+        config.language = file.language;
 
         return config;
     }
@@ -113,6 +118,7 @@ pub const Config = struct {
         try writer.print("    .publr = \"{f}\",\n", .{std.zig.fmtString(config.publr)});
         try writer.print("    .admin = \"{f}\",\n", .{std.zig.fmtString(config.admin)});
         try writer.print("    .admin_name = \"{f}\",\n", .{std.zig.fmtString(config.admin_name)});
+        try writer.print("    .language = \"{f}\",\n", .{std.zig.fmtString(config.language)});
         try writer.writeAll("}\n");
 
         try std.Io.Dir.cwd().writeFile(config.io, .{

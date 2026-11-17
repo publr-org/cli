@@ -35,6 +35,7 @@ const usage =
     \\                             --admin-only: no front end, / opens the admin
     \\                             --publr <version>: that release, not the newest
     \\                             --admin <email> [--admin-name <name>]: its first admin
+    \\                             --language <code>: its language (pl), not the default
     \\  publr init [<path>]        that folder made a site, or set up and listed (.: here)
     \\  publr ls [--json]          every site in every listed folder
     \\  publr start <name>...      start sites in the background
@@ -56,6 +57,9 @@ const usage =
     \\    config admin <email> [--name <name>]
     \\                               the default account email: every new site's first admin
     \\                               (not set: the Cloud account, else the setup page); --unset
+    \\    config language <code>|--unset
+    \\                               every new site's language (pl), its admin speaking it
+    \\                               from the start, its language pack installed
     \\  publr versions             the Publr releases kept, and which site runs which
     \\    versions use <version> <name>...|--all
     \\
@@ -487,6 +491,13 @@ fn new(
         } else if (std.mem.eql(u8, word, "--admin-name") and index + 1 < rest.len) {
             index += 1;
             options.admin_name = rest[index];
+        } else if (std.mem.eql(u8, word, "--language") and index + 1 < rest.len) {
+            index += 1;
+            options.language = rest[index];
+
+            if (!core.project.valid_language(options.language)) {
+                return error.Usage;
+            }
         } else if (name == null and word.len > 0 and word[0] != '-') {
             name = word;
         } else {
@@ -833,6 +844,7 @@ fn configure(config: *Config, out: *std.Io.Writer, rest: []const []const u8) !vo
 
         try out.print("publr           {s}\n", .{if (config.publr.len > 0) config.publr else "each site's pinned release"});
         try out.print("admin           {s}\n", .{if (config.admin.len > 0) config.admin else "not set: the Cloud account signed in, else the setup page"});
+        try out.print("language        {s}\n", .{if (config.language.len > 0) config.language else "English"});
         try out.print("config          {s}\n", .{try config.path(&.{core.config.file_name})});
         return;
     }
@@ -883,6 +895,14 @@ fn configure(config: *Config, out: *std.Io.Writer, rest: []const []const u8) !vo
         } else {
             return error.Usage;
         }
+    } else if (std.mem.eql(u8, rest[0], "language") and rest.len == 2) {
+        const unset = std.mem.eql(u8, rest[1], "--unset") or std.mem.eql(u8, rest[1], "en");
+
+        if (!unset and !core.project.valid_language(rest[1])) {
+            return error.Usage;
+        }
+
+        config.language = if (unset) "" else rest[1];
     } else if (std.mem.eql(u8, rest[0], "folders") and rest.len == 3) {
         const folder = try core.sites.absolute(config, rest[2]);
 

@@ -24,7 +24,29 @@ pub const Options = struct {
     admin: []const u8 = "",
     /// That admin's name; empty names them by their email.
     admin_name: []const u8 = "",
+    /// The site's language (`pl`), ahead of the config's (`config language`); empty leaves it
+    /// to the config, else English.
+    language: []const u8 = "",
 };
+
+/// A language's code as Publr's packs name it: two to three lowercase letters (`pl`), each
+/// pack the plugin `language_<code>`.
+pub fn valid_language(code: []const u8) bool {
+    if (code.len < 2 or code.len > 3) {
+        return false;
+    }
+
+    for (code) |letter| {
+        if (letter < 'a' or letter > 'z') {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/// How long a language pack may take to come from the plugin server.
+const pack_wait_s_max: u32 = 120;
 
 /// A new project named `name` in the default folder: made, set up, started.
 /// `self_path` is the command itself, to start the helper with.
@@ -106,7 +128,15 @@ fn make(
     const publr = try versions.binary_for(config, site);
 
     site.local.created_ms = server.now_ms(config.io);
-    try make_admin(config, &site, publr, options);
+    const given = if (options.language.len > 0) options.language else config.language;
+    // English is built in: nothing to install or choose.
+    const language = if (std.mem.eql(u8, given, "en")) "" else given;
+
+    if (language.len > 0) {
+        try speak(config, &site, publr, language);
+    }
+
+    try make_admin(config, &site, publr, language, options);
     try set_up(config, &site, publr, self_path);
 
     return site;
@@ -114,7 +144,13 @@ fn make(
 
 /// The site's first admin, chosen for it or by the config, made before it first starts, with a
 /// password of its own nobody types (the command signs them in); none leaves it to the setup page.
-fn make_admin(config: *const Config, site: *Site, publr: []const u8, options: Options) !void {
+fn make_admin(
+    config: *const Config,
+    site: *Site,
+    publr: []const u8,
+    language: []const u8,
+    options: Options,
+) !void {
     std.debug.assert(publr.len > 0);
     std.debug.assert(site.folder.len > 0);
 
@@ -127,9 +163,63 @@ fn make_admin(config: *const Config, site: *Site, publr: []const u8, options: Op
     const given_name = if (options.admin.len > 0) options.admin_name else config.admin_name;
     const name = if (given_name.len > 0) given_name else email[0 .. std.mem.indexOfScalar(u8, email, '@') orelse email.len];
 
-    _ = try run(config, publr, site.folder, &.{ "project", "init", "--email", email, "--display_name", name });
+    const init_args: []const []const u8 = &.{ "project", "init", "--email", email, "--display_name", name, "--language", language };
+
+    _ = try run(config, publr, site.folder, if (language.len > 0) init_args else init_args[0..6]);
     site.local.email = email;
     try sites_module.save(config, site.*);
+}
+
+/// The site made to speak `language` before anyone sets it up: its pack installed from the
+/// plugin server (the server started for that), then chosen as the site's language, so the
+/// setup page, if there is one, asks for the first account in it.
+fn speak(config: *const Config, site: *Site, publr: []const u8, language: []const u8) !void {
+    std.debug.assert(valid_language(language));
+    std.debug.assert(site.folder.len > 0);
+
+    const pack = try std.fmt.allocPrint(config.arena, "language_{s}", .{language});
+
+    try server.ensure_port(config, site);
+    try server.start(config, site, publr);
+
+    const asked_text = try run(config, publr, site.folder, &.{ "--as-admin", "plugin", "install", "--name", pack });
+    const Asked = struct {
+        asked: []const u8,
+    };
+    const asked = try std.json.parseFromSliceLeaky(Asked, config.arena, asked_text, .{
+        .ignore_unknown_fields = true,
+    });
+    var waited: u32 = 0;
+
+    while (waited < pack_wait_s_max) : (waited += 1) {
+        const answer_text = try run(config, publr, site.folder, &.{ "--as-admin", "job", "answer", "--id", asked.asked });
+        const Answer = struct {
+            state: []const u8,
+            problem: []const u8 = "",
+        };
+        const answer = try std.json.parseFromSliceLeaky(Answer, config.arena, answer_text, .{
+            .ignore_unknown_fields = true,
+        });
+
+        if (std.mem.eql(u8, answer.state, "done")) {
+            break;
+        }
+
+        if (std.mem.eql(u8, answer.state, "failed")) {
+            std.debug.print("publr: the {s} language pack could not be installed: {s}\n", .{
+                language,
+                answer.problem,
+            });
+            return error.LanguageNotInstalled;
+        }
+
+        try std.Io.sleep(config.io, .fromSeconds(1), .awake);
+    } else {
+        std.debug.print("publr: the {s} language pack took too long to install\n", .{language});
+        return error.LanguageNotInstalled;
+    }
+
+    _ = try run(config, publr, site.folder, &.{ "--as-admin", "project", "set_admin_language", "--language", language });
 }
 
 fn pick(config: *const Config, given: []const u8) ![]const u8 {
