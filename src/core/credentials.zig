@@ -1,10 +1,13 @@
 //! The devices this computer signed in as: one token per Publr address (and the Cloud
 //! account's, under the dashboard's address), in `credentials` beside `config.zon` (or
-//! `$PUBLR_CREDENTIALS`), readable by its user only.
+//! `$PUBLR_CREDENTIALS`), readable by its user only. Agents' tools keep theirs apart, in
+//! `tool-credentials`: a tool is a device of its own, approved for what its person chose,
+//! never riding on the person's own sign-in.
 const std = @import("std");
 const config_module = @import("config.zig");
 
 pub const file_name = "credentials";
+pub const tools_file_name = "tool-credentials";
 pub const file_bytes_max: u32 = 1 << 20;
 pub const sites_max: u32 = 256;
 pub const address_len_max: u32 = 512;
@@ -14,6 +17,12 @@ pub const Site = struct {
     token: []const u8,
     email: []const u8 = "",
     scope: []const u8 = "",
+};
+
+/// Whose devices: the person's own (the command, Desktop), or agents' tools (`publr mcp`).
+pub const Holder = enum {
+    person,
+    tools,
 };
 
 const File = struct {
@@ -98,24 +107,36 @@ pub fn host_on_this_machine(host: []const u8) bool {
         on_this_machine(name);
 }
 
-pub fn path_of(init: std.process.Init) !?[]const u8 {
+pub fn path_of(init: std.process.Init, holder: Holder) !?[]const u8 {
     const arena = init.arena.allocator();
     const own = init.environ_map.get("PUBLR_CREDENTIALS") orelse "";
 
     if (own.len > 0) {
-        return own;
+        return switch (holder) {
+            .person => own,
+            .tools => try std.fmt.allocPrint(arena, "{s}-tools", .{own}),
+        };
     }
 
     const root = config_module.root_of(arena, init.environ_map) catch return null;
 
     std.debug.assert(root.len > 0);
 
-    return try std.fs.path.join(arena, &.{ root, file_name });
+    const name = switch (holder) {
+        .person => file_name,
+        .tools => tools_file_name,
+    };
+
+    return try std.fs.path.join(arena, &.{ root, name });
 }
 
 pub fn load(init: std.process.Init) ![]const Site {
+    return load_of(init, .person);
+}
+
+pub fn load_of(init: std.process.Init, holder: Holder) ![]const Site {
     const arena = init.arena.allocator();
-    const path = try path_of(init) orelse return &.{};
+    const path = try path_of(init, holder) orelse return &.{};
     const limit: std.Io.Limit = .limited(file_bytes_max);
     const text = std.Io.Dir.cwd().readFileAlloc(init.io, path, arena, limit) catch |err| {
         return switch (err) {
@@ -135,7 +156,11 @@ pub fn load(init: std.process.Init) ![]const Site {
 
 /// The device kept for `address`; with no address, the only one kept, if there is one.
 pub fn find(init: std.process.Init, address: ?[]const u8) !?Site {
-    const sites = try load(init);
+    return find_of(init, .person, address);
+}
+
+pub fn find_of(init: std.process.Init, holder: Holder, address: ?[]const u8) !?Site {
+    const sites = try load_of(init, holder);
 
     std.debug.assert(sites.len <= sites_max);
 
@@ -155,11 +180,15 @@ pub fn find(init: std.process.Init, address: ?[]const u8) !?Site {
 
 /// Keeps `site`, replacing what was kept for its address.
 pub fn put(init: std.process.Init, site: Site) !void {
+    return put_of(init, .person, site);
+}
+
+pub fn put_of(init: std.process.Init, holder: Holder, site: Site) !void {
     std.debug.assert(site.address.len > 0);
     std.debug.assert(site.token.len > 0);
 
     const arena = init.arena.allocator();
-    const sites = try load(init);
+    const sites = try load_of(init, holder);
     var kept: std.ArrayList(Site) = .empty;
 
     for (sites) |existing| {
@@ -173,15 +202,19 @@ pub fn put(init: std.process.Init, site: Site) !void {
     }
 
     try kept.append(arena, site);
-    try save(init, kept.items);
+    try save(init, holder, kept.items);
 }
 
 /// Forgets what was kept for `address`. False when nothing was.
 pub fn remove(init: std.process.Init, address: []const u8) !bool {
+    return remove_of(init, .person, address);
+}
+
+pub fn remove_of(init: std.process.Init, holder: Holder, address: []const u8) !bool {
     std.debug.assert(address.len > 0);
 
     const arena = init.arena.allocator();
-    const sites = try load(init);
+    const sites = try load_of(init, holder);
     var kept: std.ArrayList(Site) = .empty;
 
     for (sites) |existing| {
@@ -194,16 +227,16 @@ pub fn remove(init: std.process.Init, address: []const u8) !bool {
         return false;
     }
 
-    try save(init, kept.items);
+    try save(init, holder, kept.items);
 
     return true;
 }
 
-fn save(init: std.process.Init, sites: []const Site) !void {
+fn save(init: std.process.Init, holder: Holder, sites: []const Site) !void {
     std.debug.assert(sites.len <= sites_max);
 
     const arena = init.arena.allocator();
-    const path = try path_of(init) orelse return error.NoHome;
+    const path = try path_of(init, holder) orelse return error.NoHome;
     const text = try std.json.Stringify.valueAlloc(arena, File{
         .sites = sites,
     }, .{

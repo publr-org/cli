@@ -357,7 +357,7 @@ fn call(local: *Local, init: std.process.Init, asked: Asked) !void {
     };
 
     if (reply.status == .unauthorized) {
-        _ = try credentials.remove(init, site.address);
+        _ = try credentials.remove_of(init, .tools, site.address);
 
         const text = try std.fmt.allocPrint(arena, "This computer's sign-in to {s} was " ++
             "revoked or has expired. Ask again: your person approves it anew.", .{site.address});
@@ -400,7 +400,7 @@ fn reach(local: *Local, init: std.process.Init, ask: bool) !Reach {
     };
 
     if (!ask) {
-        const kept = try credentials.find(init, address) orelse return .{
+        const kept = try credentials.find_of(init, .tools, address) orelse return .{
             .says = "",
         };
 

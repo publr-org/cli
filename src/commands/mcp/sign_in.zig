@@ -1,7 +1,8 @@
 //! Signing this computer in to a site for `publr mcp`, as `publr login` does, without a
 //! terminal to talk in: the browser opens on the site's approve page, and a call waits for
-//! the person a while before answering that it still waits. The token is kept with the
-//! command's others (`credentials.zig`), one per site for every tool on this computer.
+//! the person a while before answering that it still waits. The token is kept apart from the
+//! person's own (`credentials.zig`, `.tools`), one per site for every tool on this computer:
+//! a folder Desktop signed in to still asks once, for what the person lets tools do.
 const std = @import("std");
 const core = @import("../../core.zig");
 
@@ -40,7 +41,7 @@ pub const SignIn = struct {
     pub fn token(sign_in: *SignIn, init: std.process.Init, address: []const u8) !Outcome {
         std.debug.assert(address.len > 0);
 
-        if (try credentials.find(init, address)) |site| {
+        if (try credentials.find_of(init, .tools, address)) |site| {
             return .{
                 .token = site.token,
             };
@@ -146,7 +147,7 @@ fn claim(init: std.process.Init, pending: Pending, name: []const u8) ![]const u8
     };
     const who = try login.current(init, site);
 
-    try credentials.put(init, .{
+    try credentials.put_of(init, .tools, .{
         .address = site.address,
         .token = site.token,
         .email = who.email,
