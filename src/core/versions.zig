@@ -325,6 +325,13 @@ pub fn fetch(config: *const Config, version: []const u8) !void {
 /// Null when `binary` is what Publr published: `sums` signed with its key and listing the
 /// binary's SHA-256. Else why not.
 pub fn verified(binary: []const u8, sums: []const u8, signature: []const u8) ?[]const u8 {
+    return verified_file(binary, asset_name(), sums, signature);
+}
+
+/// Null when `file`, published as `name`, is what Publr published: `sums` signed with its key
+/// and listing `name`'s SHA-256. Else why not. Desktop's updates are checked the same way.
+pub fn verified_file(file: []const u8, name: []const u8, sums: []const u8, signature: []const u8) ?[]const u8 {
+    std.debug.assert(name.len > 0);
     std.debug.assert(signing_key_hex.len == 64);
 
     const Ed25519 = std.crypto.sign.Ed25519;
@@ -340,16 +347,15 @@ pub fn verified(binary: []const u8, sums: []const u8, signature: []const u8) ?[]
 
     parsed.verify(sums, key) catch return "the checksums' signature is not Publr's";
 
-    const expected = sum_of(sums, asset_name()) orelse
-        return "the checksums do not list this machine's binary";
+    const expected = sum_of(sums, name) orelse return "the checksums do not list it";
     var digest: [32]u8 = undefined;
 
-    std.crypto.hash.sha2.Sha256.hash(binary, &digest, .{});
+    std.crypto.hash.sha2.Sha256.hash(file, &digest, .{});
 
     const actual = std.fmt.bytesToHex(digest, .lower);
 
     if (!std.mem.eql(u8, &actual, expected)) {
-        return "the binary is not the one the checksums list";
+        return "it is not the one the checksums list";
     }
 
     return null;
