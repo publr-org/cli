@@ -6,6 +6,7 @@
 //! folder's release pin when the site runs another release.
 
 const std = @import("std");
+const api = @import("publr_api");
 const core = @import("../core.zig");
 
 const Config = core.Config;
@@ -291,9 +292,7 @@ fn review_of(config: *const Config, site: credentials.Site, branch: []const u8) 
     const Listed = struct {
         environments: []const Entry,
     };
-    const listed = try std.json.parseFromSliceLeaky(Listed, arena, reply.body, .{
-        .ignore_unknown_fields = true,
-    });
+    const listed = try api.result(Listed, arena, reply.body);
 
     for (listed.environments) |entry| {
         if (std.mem.eql(u8, entry.name, branch)) {
@@ -318,28 +317,24 @@ fn merged(config: *const Config, site: credentials.Site, branch: []const u8, aft
         return error.ActivityRefused;
     }
 
+    const Accepted = struct {
+        branch: []const u8 = "",
+    };
     const Entry = struct {
         id: i64,
-        input: []const u8,
+        input: ?Accepted = null,
     };
     const Listed = struct {
         entries: []const Entry,
     };
-    const Accepted = struct {
-        branch: []const u8 = "",
-    };
-    const listed = try std.json.parseFromSliceLeaky(Listed, arena, reply.body, .{
-        .ignore_unknown_fields = true,
-    });
+    const listed = try api.result(Listed, arena, reply.body);
 
     for (listed.entries) |entry| {
         if (entry.id <= after) {
             continue;
         }
 
-        const accepted = std.json.parseFromSliceLeaky(Accepted, arena, entry.input, .{
-            .ignore_unknown_fields = true,
-        }) catch continue;
+        const accepted = entry.input orelse continue;
 
         if (std.mem.eql(u8, accepted.branch, branch)) {
             return true;

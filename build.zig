@@ -15,8 +15,15 @@ pub fn build(builder: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    // Publr's REST API as its clients read it (../lib/api).
+    const api = builder.dependency("publr_api", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     // The build-on-publr skill each site's folder gets, from `skills/`.
     for ([_]*std.Build.Module{ core, module }) |holder| {
+        holder.addImport("publr_api", api.module("publr_api"));
         holder.addAnonymousImport("skill", .{
             .root_source_file = builder.path("skills/build-on-publr/SKILL.md"),
         });

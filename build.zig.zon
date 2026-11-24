@@ -8,6 +8,10 @@
         .publr_zig = .{
             .path = "../lib/zig",
         },
+        // Publr's REST API as its clients read it.
+        .publr_api = .{
+            .path = "../lib/api",
+        },
     },
     .paths = .{
         "build.zig",

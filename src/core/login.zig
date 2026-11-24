@@ -3,6 +3,7 @@
 //! (`device poll`) and keeps it (`credentials.zig`). `logout` revokes it there and forgets it;
 //! `whoami` says whose it is and what it may do.
 const std = @import("std");
+const api = @import("publr_api");
 const builtin = @import("builtin");
 const credentials = @import("credentials.zig");
 const remote = @import("remote.zig");
@@ -373,18 +374,17 @@ pub fn call(
     });
 
     if (reply.status != .ok) {
+        const refused = api.refusal(arena, reply.body);
+
         std.debug.print("publr: {s} answered {d}: {s}\n", .{
             address,
             @backingInt(reply.status),
-            reply.body,
+            if (refused.message.len > 0) refused.message else reply.body,
         });
         return error.Refused;
     }
 
-    return std.json.parseFromSliceLeaky(Out, arena, reply.body, .{
-        .ignore_unknown_fields = true,
-        .allocate = .alloc_always,
-    });
+    return api.result(Out, arena, reply.body);
 }
 
 /// "The publr command on <this computer's name>".

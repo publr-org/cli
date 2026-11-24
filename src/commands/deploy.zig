@@ -7,6 +7,7 @@
 //! a server of its own beside the site's (`clone/arriving.zig`).
 
 const std = @import("std");
+const api = @import("publr_api");
 const core = @import("../core.zig");
 const Arriving = @import("clone/arriving.zig").Arriving;
 
@@ -597,7 +598,10 @@ const Client = struct {
     fn call(client: Client, operation: []const u8, payload: []const u8) !transfer.Reply {
         const arena = client.config.arena;
         const reply = try core.remote.post(client.config.io, arena, .{
-            .url = try std.fmt.allocPrint(arena, "{s}/api/{s}", .{ client.dashboard, operation }),
+            .url = try std.fmt.allocPrint(arena, "{s}{s}", .{
+                client.dashboard,
+                try api.path(arena, operation),
+            }),
             .payload = payload,
             .token = client.token,
         });
@@ -613,19 +617,10 @@ const Client = struct {
         const arena = client.config.arena;
 
         if (reply.status == .ok or reply.status == .created) {
-            return try std.json.parseFromSliceLeaky(Answer, arena, reply.body, .{
-                .ignore_unknown_fields = true,
-                .allocate = .alloc_always,
-            });
+            return try api.result(Answer, arena, reply.body);
         }
 
-        const Refusal = struct {
-            @"error": []const u8 = "",
-            message: []const u8 = "",
-        };
-        const refusal = std.json.parseFromSliceLeaky(Refusal, arena, reply.body, .{
-            .ignore_unknown_fields = true,
-        }) catch Refusal{};
+        const refusal = api.refusal(arena, reply.body);
         const why = if (refusal.message.len > 0) refusal.message else refusal.@"error";
 
         refused_because = why;
@@ -655,10 +650,9 @@ const Client = struct {
         const Synced = struct {
             sync: []const u8 = "",
         };
-        const synced = std.json.parseFromSliceLeaky(Synced, client.config.arena, reply.body, .{
-            .ignore_unknown_fields = true,
-            .allocate = .alloc_always,
-        }) catch return client.dashboard;
+        const synced = api.result(Synced, client.config.arena, reply.body) catch {
+            return client.dashboard;
+        };
 
         if (synced.sync.len == 0 or std.mem.indexOf(u8, synced.sync, "://") == null) {
             return client.dashboard;
@@ -684,9 +678,20 @@ const Client = struct {
             upload: []const u8,
             bytes: u64 = 0,
         };
-        const uploaded = try client.answered(Uploaded, reply) orelse return null;
 
-        return uploaded.upload;
+        // A route of the dashboard's own, not an operation: its answer is as it says.
+        if (reply.status == .ok or reply.status == .created) {
+            const uploaded = std.json.parseFromSliceLeaky(Uploaded, arena, reply.body, .{
+                .ignore_unknown_fields = true,
+                .allocate = .alloc_always,
+            }) catch return null;
+
+            return uploaded.upload;
+        }
+
+        _ = try client.answered(Uploaded, reply);
+
+        return null;
     }
 };
 
