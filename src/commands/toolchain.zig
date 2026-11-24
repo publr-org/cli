@@ -9,6 +9,8 @@ const publr_zig = @import("publr_zig");
 
 /// How a `wasm32` module is built with it, after Publr's recipe and its compiler_rt.
 pub const wasm_flags = publr_zig.wasm_flags;
+/// How a module is built with a Zig that has LLVM (`PUBLR_PLUGIN_ZIG`): LLVM, its linker.
+const llvm_flags = [_][]const u8{ "-fno-ubsan-rt", "-fno-entry" };
 /// The one target it builds.
 pub const wasm_target = "wasm32-freestanding";
 
@@ -93,14 +95,40 @@ pub fn compile(init: std.process.Init, tools: Toolchain, args: []const []const u
     const arena = init.arena.allocator();
     var argv: std.ArrayList([]const u8) = .empty;
 
+    // A Zig with LLVM, named for builds Publr ships (its plugins server): LLVM optimising
+    // for speed, as a plugin runs metered and LLVM's code takes a few times fewer
+    // instructions. The carried compiler has none.
+    if (init.environ_map.get("PUBLR_PLUGIN_ZIG")) |llvm_zig| if (llvm_zig.len > 0) {
+        try argv.append(arena, llvm_zig);
+
+        for (args) |word| {
+            if (std.mem.eql(u8, word, "-Osmall")) {
+                try argv.appendSlice(arena, &.{ "-OReleaseFast", "-fstrip" });
+            } else {
+                try argv.append(arena, word);
+            }
+        }
+
+        try argv.appendSlice(arena, &llvm_flags);
+        try argv.appendSlice(arena, &.{ "--cache-dir", tools.cache, "--global-cache-dir", tools.cache });
+
+        return wait(init, argv.items);
+    };
+
     try argv.append(arena, tools.compiler);
     try argv.appendSlice(arena, args);
     try argv.append(arena, tools.compiler_rt);
     try argv.appendSlice(arena, &wasm_flags);
     try argv.appendSlice(arena, &.{ "--cache-dir", tools.cache, "--global-cache-dir", tools.cache });
 
+    return wait(init, argv.items);
+}
+
+fn wait(init: std.process.Init, argv: []const []const u8) !u8 {
+    std.debug.assert(argv.len > 0);
+
     var child = try std.process.spawn(init.io, .{
-        .argv = argv.items,
+        .argv = argv,
     });
 
     return switch (try child.wait(init.io)) {
