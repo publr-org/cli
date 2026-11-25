@@ -216,7 +216,10 @@ fn changes_of(arena: std.mem.Allocator, said: []const u8) ![]const []const u8 {
     var lines = std.mem.splitScalar(u8, said, '\n');
 
     while (lines.next()) |line| {
-        if (std.mem.startsWith(u8, line, "rebuild ") or std.mem.startsWith(u8, line, "drop ")) {
+        if (std.mem.startsWith(u8, line, "rebuild ") or std.mem.startsWith(u8, line, "drop ") or
+            std.mem.startsWith(u8, line, "create ") or std.mem.startsWith(u8, line, "null ") or
+            std.mem.startsWith(u8, line, "forget "))
+        {
             try found.append(arena, line);
         }
     }
