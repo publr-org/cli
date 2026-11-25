@@ -44,15 +44,17 @@ const check_name = "compat.json";
 const check_bytes_max: u32 = 64 * 1024;
 
 pub const Options = struct {
-    /// Run Cloud's Publr on the database when no answer is kept for it. False answers from
-    /// what is kept alone (a development build never checked counts as compatible until it
-    /// is): for a caller that must not wait, as Desktop's main thread.
-    check: bool = true,
+    /// Wait: ask Cloud for its release when the one kept is old, and run Cloud's Publr on the
+    /// database when no answer is kept for it. False answers from what is kept alone, of any
+    /// age (`error.NotKnown` before Cloud was ever asked; a development build never checked
+    /// counts as compatible until it is): for a caller that must not wait, as Desktop's main
+    /// thread, which asks the rest on another.
+    wait: bool = true,
 };
 
 /// Where `site` stands against Cloud's release.
 pub fn of(config: *const Config, site: Site, options: Options) !Version {
-    const cloud = try cloud_release(config);
+    const cloud = if (options.wait) try cloud_release(config) else try kept_release(config);
     const linked = (links.read_cloud(config, site.folder) catch null) != null;
 
     if (versions.chosen_binary(config, site)) |binary| {
@@ -111,6 +113,13 @@ fn order_of(left: []const u8, right: []const u8) std.math.Order {
     const b = std.SemanticVersion.parse(right) catch return .eq;
 
     return a.order(b);
+}
+
+/// The release Cloud runs as last asked, of any age, without asking.
+pub fn kept_release(config: *const Config) ![]const u8 {
+    const found = read_kept(config, try config.path(&.{cache_name})) orelse return error.NotKnown;
+
+    return found.version;
 }
 
 /// The release Cloud runs, as its health check says (no sign-in needed), kept for an hour;
@@ -215,7 +224,7 @@ fn opens(config: *const Config, site: Site, binary: []const u8, cloud: []const u
         }
     }
 
-    if (!options.check) {
+    if (!options.wait) {
         return true;
     }
 
