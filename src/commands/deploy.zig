@@ -47,6 +47,8 @@ var refused_because: []const u8 = "";
 var linger_ms: u32 = 0;
 
 const Options = struct {
+    /// Behind the Publr Cloud runs: moved to it first, a step of its own (not a word).
+    update_first: bool = false,
     space: []const u8 = "",
     slug: []const u8 = "",
     name: []const u8 = "",
@@ -158,6 +160,9 @@ pub fn run(
         });
         return 1;
     };
+    // A site behind Cloud's release goes up on it: moved first, as the first step.
+    options.update_first = version.state == .update_available or version.state == .behind_cloud;
+
     const publr = try versions.binary_for(config, site);
 
     try open_once(config, publr, folder);
@@ -182,6 +187,18 @@ pub fn run(
     }
 
     return deploy(init, client, out, publr, folder, options);
+}
+
+/// The site moved to the release Cloud runs before it is packed (`publr upgrade`): backed up,
+/// migrated and started on it, so what goes up is what Cloud's Publr opens. Answers the Publr
+/// that runs it now.
+fn moved_to_cloud(config: *const Config, folder: []const u8) ![]const u8 {
+    var site = try core.sites.load(config, folder, folder);
+    const chosen = try core.upgrade.plan(config, site);
+
+    try core.upgrade.run(config, &site, chosen, .{});
+
+    return versions.binary_for(config, try core.sites.load(config, folder, folder));
 }
 
 /// A site made and never run has no database yet: its Publr makes it, as `serve` would, so
@@ -249,6 +266,7 @@ fn open_page(
 
     arriving.open(config, publr, release, page_email, port, "deploying", .{
         .direction = "up",
+        .update_first = options.update_first,
         .name = options.name,
         .folder = where,
     }) catch |err| {
@@ -342,12 +360,24 @@ fn go(
         };
     }
 
+    var exporter = publr;
+
+    if (options.update_first) {
+        try client.event(.{
+            .stage = "updating",
+        });
+        phase(page, "updating");
+        try progress(out, "Updating it to the Publr Cloud runs", .{});
+        exporter = try moved_to_cloud(config, folder);
+        try out.print("done\n", .{});
+    }
+
     try client.event(.{
         .stage = "packing",
     });
     phase(page, "packing");
     try progress(out, "Packing the site", .{});
-    try site_data.export_to(config, publr, folder, exported, .{});
+    try site_data.export_to(config, exporter, folder, exported, .{});
 
     const made = try archive.write(config.io, arena, exported, file, .{});
 

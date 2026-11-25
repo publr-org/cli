@@ -222,7 +222,7 @@ pub fn ensure_base(config: *const Config, linked: *Linked) !void {
 
 /// The folder pinned to the release the site runs now, when Cloud moved it: an exact match
 /// is what a clone needs, so the folder follows its site.
-fn follow_release(config: *const Config, linked: *Linked) !void {
+pub fn follow_release(config: *const Config, linked: *Linked) !void {
     const release = try transfer.release_of(config.io, config.arena, linked.site) orelse return;
     const pinned = try versions.pin_of(config, linked.folder);
     if (pinned != null and std.mem.eql(u8, pinned.?, release)) {

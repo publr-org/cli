@@ -26,6 +26,8 @@ const choice_poll_ms: u32 = 300;
 pub const Progress = struct {
     /// `down` (a clone) or `up` (a deploy).
     direction: []const u8 = "down",
+    /// Up: moved to the Publr Cloud runs first, a step of its own on the page.
+    update_first: bool = false,
     name: []const u8 = "",
     folder: []const u8 = "",
     phase: []const u8 = "packing",

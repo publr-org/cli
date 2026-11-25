@@ -23,8 +23,11 @@ pub const Clone = struct {
     /// The folder it goes into, as the page names it.
     folder: []const u8 = "",
     /// Down: `choosing`, `packing`, `downloading`, `unpacking`, `placeholders`, `starting`.
-    /// Up: `packing`, `uploading`, `going_live`, `done`. Either: `failed`.
+    /// Up: `updating` (when `update_first`), `packing`, `uploading`, `going_live`, `done`.
+    /// Either: `failed`.
     phase: []const u8 = "packing",
+    /// Up: the project is moved to the Publr Cloud runs first, a step of its own.
+    update_first: bool = false,
     /// How far the site is packing it, in ten-thousandths.
     packed_through: u32 = 0,
     /// Bytes downloaded (or uploaded) so far.
@@ -69,7 +72,7 @@ const the_clone = publr.query.prepare(
     \\*[_type == "clone_progress.clone"][0]{ "id": _id, name, folder, phase, packed_through,
     \\  done_bytes, total_bytes, placeholders, unpacked_bytes, media, database_bytes,
     \\  media_files, media_bytes, apps_bytes, plugins_bytes, problem, elapsed_ms, chosen, direction,
-    \\  address, admin }
+    \\  address, admin, update_first }
 , .{});
 
 const Found = struct {
@@ -94,6 +97,7 @@ const Found = struct {
     direction: []const u8 = "down",
     address: []const u8 = "",
     admin: []const u8 = "",
+    update_first: bool = false,
 };
 
 fn found_of(ctx: *publr.Ctx) publr.Error!?Found {
@@ -122,6 +126,7 @@ fn clone_of(found: Found) Clone {
         .direction = found.direction,
         .address = found.address,
         .admin = found.admin,
+        .update_first = found.update_first,
     };
 }
 
@@ -314,8 +319,16 @@ const share_min_percent: f64 = 12;
 fn marks_of(comptime Item: type, ctx: *publr.Ctx, now: Clone, media: bool) publr.Error![]const Item {
     const up = std.mem.eql(u8, now.direction, "up");
     // A deploy's bar is its steps, as the page moves through them: packing here a tenth, the
-    // upload most of it, Cloud the rest.
-    const parts = if (up) [_]struct {
+    // upload most of it, Cloud the rest; moving it to Cloud's Publr first, a tenth before them.
+    const parts = if (up and now.update_first) [_]struct {
+        []const u8,
+        u64,
+    }{
+        .{ "Updating", 10 },
+        .{ "Packing", 10 },
+        .{ "Uploading", 70 },
+        .{ "Going live", 10 },
+    } else if (up) [_]struct {
         []const u8,
         u64,
     }{

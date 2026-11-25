@@ -12,6 +12,8 @@ type Mark = { label: string; at: string; span: string; start: number; width: num
 /** Where the clone is, as `clone_progress.state` answers it. */
 type Progressed = {
   phase: string;
+  /** Up: moved to the Publr Cloud runs first, a step of its own. */
+  update_first: boolean;
   /** How far the site is packing it, in ten-thousandths. */
   packed_through: number;
   done_bytes: number;
@@ -69,6 +71,8 @@ export function CloneSteps({ direction, marks_all, marks_setup, ctx }: CloneStep
     here: false,
     /** `up` while the site goes up to Cloud. */
     up: direction === "up",
+    /** Up: moved to the Publr Cloud runs before it is packed. */
+    update_first: false,
     address: "",
     admin: "",
     asking: false,
@@ -97,12 +101,15 @@ export function CloneSteps({ direction, marks_all, marks_setup, ctx }: CloneStep
    * site packs it, a third while it downloads, the last third while it unpacks. */
   const through = () => {
     if (state.up) {
-      // Up: packing here is the first tenth, the upload the most of it, Cloud the rest.
+      // Up: packing here is the first tenth, the upload the most of it, Cloud the rest; moving
+      // it to Cloud's Publr first takes a tenth before them, out of the upload's share.
       const sent = state.total_bytes > 0 ? state.done_bytes / state.total_bytes : 0;
+      const first = state.update_first ? 0.1 : 0;
       if (state.here) return 1;
-      if (state.phase === "uploading") return 0.1 + sent * 0.8;
+      if (state.phase === "updating") return 0.05;
+      if (state.phase === "uploading") return first + 0.1 + sent * (0.8 - first);
       if (state.phase === "going_live") return 0.95;
-      return 0.05;
+      return first + 0.05;
     }
     if (state.here || state.phase === "placeholders" || state.phase === "starting") return 1;
     const total = layout().reduce((sum, mark) => sum + mark.bytes, 0);
@@ -132,6 +139,7 @@ export function CloneSteps({ direction, marks_all, marks_setup, ctx }: CloneStep
     if (state.here) return Publr.t("Done");
     if (state.phase === "failed") return Publr.t("It stopped");
     if (state.up) {
+      if (state.phase === "updating") return Publr.t("Updating to the Publr Cloud runs");
       if (state.phase === "uploading") return Publr.t("Uploading");
       if (state.phase === "going_live") return Publr.t("Going live on Cloud");
       return Publr.t("Packing it here");
@@ -222,6 +230,7 @@ export function CloneSteps({ direction, marks_all, marks_setup, ctx }: CloneStep
         state.layout_all = answered.marks_all;
         state.layout_setup = answered.marks_setup;
         state.phase = found.phase;
+        state.update_first = found.update_first;
         state.packed_through = found.packed_through;
         state.done_bytes = found.done_bytes;
         state.total_bytes = found.total_bytes;

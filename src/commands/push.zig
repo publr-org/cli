@@ -16,6 +16,35 @@ const push_route = "/api/environments/push";
 const push_dir = ".publr/push";
 const upload_piece_bytes: u32 = 256 << 10;
 
+/// A running server on another Publr than the folder's started again on the folder's.
+fn serving_current(config: *const Config, linked: pulling.Linked) !void {
+    var site = try core.sites.load(config, linked.folder, linked.folder);
+
+    if (!core.server.running(config.io, site)) {
+        return;
+    }
+
+    const pin = (try core.versions.pin_of(config, linked.folder)) orelse return;
+    const health = try std.fmt.allocPrint(config.arena, "{s}/api/health", .{try core.server.site_url(config.arena, site)});
+    var body: std.Io.Writer.Allocating = .init(config.arena);
+
+    core.versions.get(config.io, health, &body.writer) catch return;
+
+    const Health = struct {
+        version: []const u8 = "",
+    };
+    const said = std.json.parseFromSliceLeaky(Health, config.arena, body.written(), .{
+        .ignore_unknown_fields = true,
+    }) catch return;
+
+    if (said.version.len == 0 or std.mem.eql(u8, said.version, pin)) {
+        return;
+    }
+
+    try core.server.stop(config, &site);
+    try core.server.start(config, &site, linked.publr);
+}
+
 pub fn run(
     init: std.process.Init,
     config: *const Config,
@@ -31,6 +60,10 @@ pub fn run(
     var linked = try pulling.linked_here(init, config, &code) orelse return code;
 
     try pulling.ensure_base(config, &linked);
+    // Its work goes up on the Publr its site runs: the folder follows the site's release, and
+    // a server still on the one before starts again on it (its gate backs it up and migrates).
+    try pulling.follow_release(config, &linked);
+    try serving_current(config, linked);
 
     // What is sent, named before exporting: work made while it goes up is not in it.
     const sent = try core.changes.mark(config, linked.publr, linked.folder, linked.link.since);
