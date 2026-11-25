@@ -53,7 +53,7 @@ pub const Options = struct {
 /// Where `site` stands against Cloud's release.
 pub fn of(config: *const Config, site: Site, options: Options) !Version {
     const cloud = if (options.wait) try cloud_release(config) else try kept_release(config);
-    const linked = (links.read_cloud(config, site.folder) catch null) != null;
+    const linked = linked_to_cloud(config, site.folder);
 
     if (versions.chosen_binary(config, site)) |binary| {
         const compatible = try opens(config, site, binary, cloud, options);
@@ -77,6 +77,20 @@ pub fn of(config: *const Config, site: Site, options: Options) !Version {
     };
 
     return of_release(config.arena, pin, cloud, linked);
+}
+
+/// Whether the folder is a copy of a site on Cloud: one deployed from it (`cloud.json`) or one
+/// cloned from Cloud (`.publr/clone.json`). Either follows its site by itself.
+fn linked_to_cloud(config: *const Config, folder: []const u8) bool {
+    for ([_][]const u8{ links.cloud_name, links.clone_path }) |name| {
+        const path = std.fs.path.join(config.arena, &.{ folder, name }) catch continue;
+
+        if (std.Io.Dir.cwd().access(config.io, path, .{})) |_| {
+            return true;
+        } else |_| {}
+    }
+
+    return false;
 }
 
 /// A site that runs release `pin`, against Cloud's `cloud`.
