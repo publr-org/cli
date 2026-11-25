@@ -42,6 +42,9 @@ pub const Where = struct {
     waiting: bool,
     /// The site has changed since the folder last came down.
     behind: bool,
+    /// It was all pushed and its branch is gone unmerged: the review discarded it, so the
+    /// folder comes down again as the site is (a pull wipes the work).
+    discarded: bool = false,
     /// The branch it pushes to, and the site.
     branch: []const u8,
     site: []const u8,
@@ -261,6 +264,7 @@ fn where_of(config: *const Config, linked: Linked) !?Where {
         .unsent = unsent,
         .waiting = waiting,
         .behind = size.latest_change != linked.link.pulled,
+        .discarded = pushed and review == null,
         .branch = linked.link.branch,
         .site = linked.link.site,
         .review = if (waiting) review.? else "",
