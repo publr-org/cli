@@ -23,14 +23,13 @@ pub const usage =
     \\
 ;
 
-/// What was asked: `--media none` brings no media files down (placeholders stand in);
+/// What was asked: no media files come down unless `--media all` (the copy loads them from the
+/// site it copies, through `media_origin`, or placeholders stand in);
 /// `--size` only says what a clone would bring down.
 const Asked = struct {
     given: []const u8 = "",
     folder: ?[]const u8 = null,
-    media: bool = true,
-    /// `--media` was given: nothing to ask.
-    media_given: bool = false,
+    media: bool = false,
     size_only: bool = false,
     /// The port its page, then the site, answers on; a free one when null.
     port: ?u16 = null,
@@ -55,7 +54,6 @@ fn parse(args: []const []const u8) ?Asked {
             }
 
             asked.media = all;
-            asked.media_given = true;
         } else if (std.mem.eql(u8, arg, "--port") and index + 1 < args.len) {
             index += 1;
             asked.port = std.fmt.parseInt(u16, args[index], 10) catch return null;
@@ -121,15 +119,12 @@ pub fn run(
     // Weighed before the page is drawn: its choice and its bar's parts come from this.
     const size = try transfer.size_of(config.io, config.arena, syncing) orelse transfer.Size{};
     const port = asked.port orelse try (try core.Sites.find(config)).free_port(&core.server.listening);
-    // Asked on the page what comes down, unless the command said (`--media`) or the site has
-    // no media files, when everything is all there is.
-    const asking = !asked.media_given and size.media_files > 0;
     var arriving: Arriving = undefined;
 
     try arriving.open(config, publr, release, site.email, port, "cloning", .{
         .name = name,
         .folder = shown_folder(folder),
-        .phase = if (asking) "choosing" else "packing",
+        .phase = "packing",
         .media = asked.media,
         .database_bytes = size.database_bytes,
         .media_files = size.media_files,
@@ -147,17 +142,7 @@ pub fn run(
         core.login.open_browser(init, page);
     }
 
-    var media = asked.media;
-
-    if (asking) {
-        try out.writeAll("Choose on that page what comes down (or run again with --media all|none).\n");
-        try out.flush();
-        media = arriving.wait_for_choice() catch |err| {
-            arriving.close();
-            std.debug.print("publr clone: {s}\n", .{stopped_because(err)});
-            return 1;
-        };
-    }
+    const media = asked.media;
 
     const latest = bring_down(config, out, syncing, publr, folder, media, &arriving) catch |err| {
         const why = stopped_because(err);
@@ -181,9 +166,11 @@ pub fn run(
         .site = site.address,
         .branch = try links.new_branch(config.io, config.arena),
         .pulled = latest,
+        .media = media,
     });
 
-    if (!media) {
+    // Without a server to install `media_origin` into, placeholders stand in for the media.
+    if (!media and !asked.serve) {
         arriving.progress.phase = "placeholders";
         _ = try arriving.feed(true);
 
@@ -206,7 +193,21 @@ pub fn run(
         return 0;
     }
 
-    return serve(config, out, folder, site.email, port, self_path);
+    const code = try serve(config, out, folder, site.email, port, self_path);
+
+    // The copy loads its media from the site it copies; placeholders stand in only when that
+    // cannot be set up (a Publr without `media.base`, the marketplace out of reach).
+    if (!media) {
+        if (site_data.media_from(config, publr, folder, site.address)) {
+            try out.print("Media loads from {s}: none came down.\n", .{site.address});
+        } else {
+            const written = try site_data.write_placeholders(config, publr, folder);
+
+            try out.print("Placeholders stand in for {d} media files; push never sends them.\n", .{written});
+        }
+    }
+
+    return code;
 }
 
 /// The page says why the clone stopped, a moment before its server goes.

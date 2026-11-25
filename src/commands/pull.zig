@@ -45,6 +45,10 @@ pub const Where = struct {
     /// It was all pushed and its branch is gone unmerged: the review discarded it, so the
     /// folder comes down again as the site is (a pull wipes the work).
     discarded: bool = false,
+    /// The folder holds the site's media files (false: they load from the site).
+    media: bool = true,
+    /// What the site's media files weigh, for `pull --media` to say first.
+    media_bytes: u64 = 0,
     /// The branch it pushes to, and the site.
     branch: []const u8,
     site: []const u8,
@@ -140,14 +144,21 @@ pub fn run(
     rest: []const []const u8,
 ) !u8 {
     const checking = rest.len == 1 and std.mem.eql(u8, rest[0], "--check");
+    // `--media`: a copy that loads its media from the site brings every file down, keeps them
+    // from then on, and serves them itself.
+    const all_media = rest.len == 1 and std.mem.eql(u8, rest[0], "--media");
 
-    if (rest.len > 0 and !checking) {
-        std.debug.print("usage: publr pull [--check]\n", .{});
+    if (rest.len > 0 and !checking and !all_media) {
+        std.debug.print("usage: publr pull [--check | --media]\n", .{});
         return 2;
     }
 
     var code: u8 = 0;
     var linked = try linked_here(init, config, &code) orelse return code;
+
+    if (all_media and !linked.link.media) {
+        return media_down(config, &linked, out);
+    }
 
     try ensure_base(config, &linked);
     try follow_release(config, &linked);
@@ -265,6 +276,8 @@ fn where_of(config: *const Config, linked: Linked) !?Where {
         .waiting = waiting,
         .behind = size.latest_change != linked.link.pulled,
         .discarded = pushed and review == null,
+        .media = linked.link.media,
+        .media_bytes = size.media_bytes,
         .branch = linked.link.branch,
         .site = linked.link.site,
         .review = if (waiting) review.? else "",
@@ -353,14 +366,58 @@ const Brought = struct {
     bytes: u64,
 };
 
-/// The site packed without what the folder holds the same and put in place, in the folder
-/// and as its base; null, having said why, when it was not.
-fn bring_down(config: *const Config, linked: Linked, out: *std.Io.Writer) !?Brought {
+/// Every media file of the site brought into a copy that loaded them from it: the folder holds
+/// them from now on (pulls bring new ones) and its own Publr serves them (`media_origin` set
+/// back to the site itself). Its own work stays: only media comes down.
+fn media_down(config: *const Config, linked: *Linked, out: *std.Io.Writer) !u8 {
+    linked.link.media = true;
+
+    const brought = try bring_media(config, linked.*, out) orelse return 1;
+
+    try links.write_clone(config, linked.folder, linked.link);
+    _ = core.project.run(config, linked.publr, linked.folder, &.{ "--as-admin", site_data.media_origin, "set", "--origin", "" }) catch {};
+    try out.print("Media of {s} came down: {d} KiB\n", .{ linked.link.site, brought / 1024 });
+
+    return 0;
+}
+
+/// The site packed with its media and only the media files taken into the folder; the bytes
+/// that came down. Null, having said why, when the site did not pack.
+fn bring_media(config: *const Config, linked: Linked, out: *std.Io.Writer) !?u64 {
     const arena = config.arena;
     const cwd = std.Io.Dir.cwd();
     const asked = try std.json.Stringify.valueAlloc(arena, .{
         .have = try held(config, linked),
     }, .{});
+    const made = try transfer.prepared(config.io, arena, linked.sync, asked, out, .{}) orelse return null;
+    const download = try std.fs.path.join(arena, &.{ linked.folder, download_name });
+
+    defer cwd.deleteFile(config.io, download) catch |err| {
+        std.log.debug("removing {s}: {t}", .{ download, err });
+    };
+
+    try transfer.fetch(config.io, linked.sync, made.bytes, download, out, .{});
+
+    const exported = try site_data.scratch_beside(config, linked.folder, "media");
+    defer cwd.deleteTree(config.io, exported) catch |err| {
+        std.log.warn("removing {s}: {t}", .{ exported, err });
+    };
+
+    _ = try archive.read(config.io, arena, download, exported);
+    try add_media(config.io, arena, exported, linked.folder);
+
+    return made.bytes;
+}
+
+/// The site packed without what the folder holds the same and put in place, in the folder
+/// and as its base; null, having said why, when it was not.
+fn bring_down(config: *const Config, linked: Linked, out: *std.Io.Writer) !?Brought {
+    const arena = config.arena;
+    const cwd = std.Io.Dir.cwd();
+    // A copy that loads its media from the site brings none.
+    const asked = if (linked.link.media) try std.json.Stringify.valueAlloc(arena, .{
+        .have = try held(config, linked),
+    }, .{}) else "{\"media\":\"none\"}";
     const made = try transfer.prepared(config.io, arena, linked.sync, asked, out, .{}) orelse return null;
     const download = try std.fs.path.join(arena, &.{ linked.folder, download_name });
 

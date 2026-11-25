@@ -120,6 +120,60 @@ pub fn state(config: *const Config, publr: []const u8, folder: []const u8, until
     });
 }
 
+/// The plugin that serves a site's media from another address (the plugins repo's
+/// `media_origin`): a copy loads its media from the site it copies.
+pub const media_origin = "media_origin";
+/// How long the marketplace's install may take, in half seconds.
+const install_waits_max: u32 = 240;
+
+/// The copy in `folder` loads its media from `address`: `media_origin` installed from Publr's
+/// marketplace and set to it. Its server must run (the install is its queued work). False,
+/// having said why, when it cannot be (its Publr has no `media.base`, the marketplace is out of
+/// reach): the caller writes placeholders instead.
+pub fn media_from(config: *const Config, publr: []const u8, folder: []const u8, address: []const u8) bool {
+    std.debug.assert(address.len > 0);
+
+    const asked = project.run(config, publr, folder, &.{ "--as-admin", "plugin", "install", "--name", media_origin }) catch return false;
+    const Asked = struct {
+        asked: []const u8 = "",
+    };
+    const id = (std.json.parseFromSliceLeaky(Asked, config.arena, asked, .{
+        .ignore_unknown_fields = true,
+    }) catch return false).asked;
+
+    if (id.len == 0) {
+        return false;
+    }
+
+    var waits: u32 = 0;
+
+    while (waits < install_waits_max) : (waits += 1) {
+        const said = project.run(config, publr, folder, &.{ "--as-admin", "job", "answer", "--id", id }) catch return false;
+        const Answer = struct {
+            state: []const u8 = "",
+            problem: []const u8 = "",
+        };
+        const answer = std.json.parseFromSliceLeaky(Answer, config.arena, said, .{
+            .ignore_unknown_fields = true,
+        }) catch return false;
+
+        if (std.mem.eql(u8, answer.state, "done")) {
+            break;
+        }
+
+        if (std.mem.eql(u8, answer.state, "failed")) {
+            std.debug.print("publr: {s} could not be installed: {s}\n", .{ media_origin, answer.problem });
+            return false;
+        }
+
+        std.Io.sleep(config.io, .fromMilliseconds(500), .awake) catch return false;
+    } else return false;
+
+    _ = project.run(config, publr, folder, &.{ "--as-admin", media_origin, "set", "--origin", address }) catch return false;
+
+    return true;
+}
+
 /// Placeholders for the media `folder`'s site came without, written by its Publr, and their
 /// list kept in `.publr/placeholders` so a push leaves them behind; how many.
 pub fn write_placeholders(config: *const Config, publr: []const u8, folder: []const u8) !u32 {

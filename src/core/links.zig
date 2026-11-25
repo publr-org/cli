@@ -38,6 +38,9 @@ pub const Clone = struct {
     /// The folder's newest write to the site when it last matched it: 0 for a folder that
     /// came down (its log came empty), a deployed folder's newest by the time it went up.
     since: i64 = 0,
+    /// The folder holds the site's media files. False: they load from the site (`media_origin`)
+    /// and pulls bring none, until `publr pull --media` brings them all down.
+    media: bool = true,
 };
 
 pub fn read_cloud(config: *const Config, folder: []const u8) !?Cloud {
