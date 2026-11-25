@@ -28,7 +28,7 @@ const server = core.server;
 const versions = core.versions;
 const compat = core.compat;
 
-pub const version = "0.2.0";
+pub const version = "0.3.0";
 
 const usage =
     \\publr: Publr sites on this computer and on Cloud
