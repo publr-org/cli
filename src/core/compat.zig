@@ -20,8 +20,6 @@ pub const State = enum {
     up_to_date,
     /// An older release, or a development build whose database Cloud's Publr opens.
     update_available,
-    /// Linked to a Cloud project, and Cloud runs a newer release than this copy.
-    behind_cloud,
     /// Cloud's Publr cannot open its database, or it runs a release newer than Cloud's.
     local_only,
 };
@@ -92,7 +90,9 @@ pub fn of_release(arena: std.mem.Allocator, pin: []const u8, cloud: []const u8, 
             .cloud = cloud,
         },
         .lt => .{
-            .state = if (linked) .behind_cloud else .update_available,
+            // A copy linked to a Cloud project follows it by itself (`publr pull --check`, which
+            // Desktop's sync runs, pins the project's release): never an update to ask for.
+            .state = if (linked) .up_to_date else .update_available,
             .runs = pin,
             .cloud = cloud,
         },
@@ -290,7 +290,6 @@ pub fn label(version: Version) []const u8 {
     return switch (version.state) {
         .up_to_date => "up to date",
         .update_available => "update out",
-        .behind_cloud => "behind Cloud",
         .local_only => "local only",
     };
 }
@@ -302,7 +301,7 @@ test "a release against Cloud's" {
 
     try std.testing.expectEqual(State.up_to_date, (try of_release(arena, "0.8.0", "0.8.0", false)).state);
     try std.testing.expectEqual(State.update_available, (try of_release(arena, "0.7.5", "0.8.0", false)).state);
-    try std.testing.expectEqual(State.behind_cloud, (try of_release(arena, "0.7.5", "0.8.0", true)).state);
+    try std.testing.expectEqual(State.up_to_date, (try of_release(arena, "0.7.5", "0.8.0", true)).state);
     // Five releases behind is one update, as one behind is.
     try std.testing.expectEqual(State.update_available, (try of_release(arena, "0.3.0", "0.8.0", false)).state);
 

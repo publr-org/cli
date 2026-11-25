@@ -161,7 +161,7 @@ pub fn run(
         return 1;
     };
     // A site behind Cloud's release goes up on it: moved first, as the first step.
-    options.update_first = version.state == .update_available or version.state == .behind_cloud;
+    options.update_first = version.state == .update_available;
 
     const publr = try versions.binary_for(config, site);
 
