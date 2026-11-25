@@ -170,9 +170,10 @@ pub fn binary_for(config: *const Config, site: Site) ![]const u8 {
         return path;
     }
 
-    // A site that names no release takes the newest, as a new one would, and keeps it.
+    // A site that names no release takes the one Cloud runs, as a new one would, and keeps it:
+    // a site on a computer never gets ahead of Cloud, where it may go.
     const pin = (try pin_of(config, site.folder)) orelse blk: {
-        const newest_release = try newest(config);
+        const newest_release = try @import("compat.zig").cloud_release(config);
 
         try set_pin(config, site.folder, newest_release);
         std.debug.print("publr: {s} now runs Publr {s}\n", .{ site.name, newest_release });

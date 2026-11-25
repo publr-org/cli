@@ -227,7 +227,9 @@ fn pick(config: *const Config, given: []const u8) ![]const u8 {
         return given;
     }
 
-    return versions.newest(config);
+    // The release Cloud runs (the newest when Cloud cannot be asked): a new site never gets
+    // ahead of Cloud, where it may go.
+    return @import("compat.zig").cloud_release(config);
 }
 
 /// The site's server started, the command trusted as its sign-on issuer, the helper running.
