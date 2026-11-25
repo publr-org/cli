@@ -10,6 +10,7 @@ const login_module = core.login;
 const mcp_command = @import("commands/mcp.zig");
 const setup_command = @import("commands/setup.zig");
 const skill_command = @import("commands/skill.zig");
+const upgrade_command = @import("commands/upgrade.zig");
 const plugin_build_command = @import("commands/plugin_build.zig");
 const pack_command = @import("commands/pack.zig");
 const clone_command = @import("commands/clone.zig");
@@ -25,6 +26,7 @@ const Site = core.Site;
 const Sites = core.Sites;
 const server = core.server;
 const versions = core.versions;
+const compat = core.compat;
 
 pub const version = "0.2.0";
 
@@ -45,6 +47,9 @@ const usage =
     \\                             --print: the signed-in link instead (good for a minute, once)
     \\  publr logs [<name>]        the end of the site's server log
     \\  publr rm <name> [--yes]    stop it and move it to its folder's .trash
+    \\  publr upgrade <name>...    moved to the Publr Cloud runs, repaired when Cloud's Publr
+    \\                             cannot open it (--check: only say; --yes: agree to what is
+    \\                             kept aside; --all: every site)
     \\  publr desktop [<name>]     Publr Desktop opened
     \\  publr config               where sites go and which folders hold them
     \\    config folder <path>       the default folder
@@ -116,6 +121,7 @@ pub const Command = enum {
     open,
     logs,
     rm,
+    upgrade,
     desktop,
     config,
     versions,
@@ -200,6 +206,7 @@ fn run(init: std.process.Init) !u8 {
         .open => try open(init, &config, out, rest, self_path),
         .logs => try logs(&config, out, rest),
         .rm => try remove(init, &config, out, rest),
+        .upgrade => return upgrade_of(&config, out, rest),
         .desktop => try desktop(init, &config, rest),
         .config => try configure(&config, out, rest),
         .versions => try versions_command(&config, out, rest),
@@ -441,6 +448,24 @@ fn many(config: *const Config, rest: []const []const u8) ![]Site {
     return chosen.items;
 }
 
+/// `publr upgrade`: its flags taken out of the words, the rest naming sites.
+fn upgrade_of(config: *const Config, out: *std.Io.Writer, rest: []const []const u8) !u8 {
+    var flags: upgrade_command.Flags = .{};
+    var names: std.ArrayList([]const u8) = .empty;
+
+    for (rest) |word| {
+        if (std.mem.eql(u8, word, "--check")) {
+            flags.check = true;
+        } else if (std.mem.eql(u8, word, "--yes")) {
+            flags.yes = true;
+        } else {
+            try names.append(config.arena, word);
+        }
+    }
+
+    return upgrade_command.run(config, out, try many(config, names.items), flags);
+}
+
 /// The site around this folder, as the list knows it.
 fn here_site(config: *const Config, sites: *const Sites) !Site {
     const here = try std.process.currentPathAlloc(config.io, config.arena);
@@ -591,21 +616,23 @@ fn list(config: *const Config, out: *std.Io.Writer, rest: []const []const u8) !v
         if (!std.mem.eql(u8, entry, site.entry)) {
             entry = site.entry;
             try out.print("\n{s}\n", .{entry});
-            try out.print("  {s:<24} {s:<8} {s:<10} {s:<24} {s}\n", .{ "NAME", "STATE", "PUBLR", "SITE", "ADMIN" });
+            try out.print("  {s:<24} {s:<8} {s:<18} {s:<13} {s:<24} {s}\n", .{ "NAME", "STATE", "PUBLR", "VERSION", "SITE", "ADMIN" });
         }
 
         const state = if (server.running(config.io, site)) "running" else "stopped";
         const publr = versions.running_label(config, site) catch "unreadable";
+        const standing = if (compat.of(config, site, .{})) |found| compat.label(found) else |_| "unknown";
 
         if (site.local.port == 0) {
-            try out.print("  {s:<24} {s:<8} {s:<10} {s:<24} {s}\n", .{ site.name, state, publr, "-", "-" });
+            try out.print("  {s:<24} {s:<8} {s:<18} {s:<13} {s:<24} {s}\n", .{ site.name, state, publr, standing, "-", "-" });
             continue;
         }
 
-        try out.print("  {s:<24} {s:<8} {s:<10} {s:<24} {s}\n", .{
+        try out.print("  {s:<24} {s:<8} {s:<18} {s:<13} {s:<24} {s}\n", .{
             site.name,
             state,
             publr,
+            standing,
             try server.site_url(config.arena, site),
             try server.admin_url(config.arena, site),
         });
@@ -622,6 +649,8 @@ fn list_json(config: *const Config, out: *std.Io.Writer, sites: Sites) !void {
         port: u16,
         site: []const u8,
         admin: []const u8,
+        /// Where it stands against Cloud's release: `compat.Version`; null when it could not be told.
+        version: ?compat.Version,
     };
     var rows: std.ArrayList(Row) = .empty;
 
@@ -637,6 +666,7 @@ fn list_json(config: *const Config, out: *std.Io.Writer, sites: Sites) !void {
             .port = port,
             .site = if (port > 0) try server.site_url(config.arena, site) else "",
             .admin = if (port > 0) try server.admin_url(config.arena, site) else "",
+            .version = compat.of(config, site, .{}) catch null,
         });
     }
 

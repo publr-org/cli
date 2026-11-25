@@ -19,6 +19,8 @@ pub const transfer = @import("core/transfer.zig");
 pub const links = @import("core/links.zig");
 pub const changes = @import("core/changes.zig");
 pub const skill = @import("core/skill.zig");
+pub const compat = @import("core/compat.zig");
+pub const upgrade = @import("core/upgrade.zig");
 
 pub const Config = config.Config;
 pub const Site = sites.Site;

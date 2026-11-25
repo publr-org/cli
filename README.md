@@ -7,11 +7,12 @@ every other command goes to that site's Publr, so `./publr` is never typed.
 
 ```
 publr new shop            a site in ~/Publr, started, the admin opened signed in
-publr ls                  every site in every listed folder
+publr ls                  every site in every listed folder, and where each stands against Cloud
 publr start|stop|restart  one or more sites (stop --all)
 publr open shop [path]    the admin in your browser, signed in (--print: just the link)
 publr logs shop           the end of its server log
 publr rm shop [--yes]     stop it and move it to its folder's .trash
+publr upgrade shop        moved to the Publr Cloud runs, repaired first when it must be
 publr init [<path>]       a folder made a site, or an existing one listed
 publr config              the default folder and the other folders
 publr versions            the Publr releases kept, which site runs which

@@ -131,12 +131,6 @@ pub fn run(
         options.dashboard = std.mem.trimEnd(u8, given, "/");
     }
 
-    const token = try cloud_login.token_for(init, options.dashboard, cloud_login.token_variable) orelse {
-        std.debug.print("publr deploy: not signed in to {s}; run `publr cloud login`\n", .{
-            options.dashboard,
-        });
-        return 1;
-    };
     const here = try std.process.currentPathAlloc(config.io, config.arena);
     const folder = try core.sites.around(config.io, config.arena, here) orelse {
         std.debug.print("publr deploy: no site here; run it in a site's folder\n", .{});
@@ -149,7 +143,22 @@ pub fn run(
         return 1;
     }
 
-    const publr = try versions.binary_for(config, try core.sites.load(config, folder, folder));
+    const site = try core.sites.load(config, folder, folder);
+    const version = try core.compat.of(config, site, .{});
+
+    if (version.state == .local_only) {
+        std.debug.print("publr deploy: {s}. `publr upgrade {s}` makes it Cloud compatible " ++
+            "(Make Cloud compatible in Publr Desktop), then deploy again\n", .{ version.reason, site.name });
+        return 1;
+    }
+
+    const token = try cloud_login.token_for(init, options.dashboard, cloud_login.token_variable) orelse {
+        std.debug.print("publr deploy: not signed in to {s}; run `publr cloud login`\n", .{
+            options.dashboard,
+        });
+        return 1;
+    };
+    const publr = try versions.binary_for(config, site);
 
     try open_once(config, publr, folder);
 
