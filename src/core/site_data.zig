@@ -171,7 +171,26 @@ pub fn media_from(config: *const Config, publr: []const u8, folder: []const u8, 
 
     _ = project.run(config, publr, folder, &.{ "--as-admin", media_origin, "set", "--origin", address }) catch return false;
 
+    // A Publr from before `media.base` takes the plugin and changes nothing: the copy's media
+    // addresses must start at `address` now, or the setting is taken back.
+    if (!media_based(config, publr, folder, address)) {
+        _ = project.run(config, publr, folder, &.{ "--as-admin", media_origin, "set", "--origin", "" }) catch {};
+        std.debug.print("publr: this Publr cannot load media from {s} yet\n", .{address});
+        return false;
+    }
+
     return true;
+}
+
+/// Whether the copy's media addresses start at `address`: its first media file's, asked of its
+/// Publr; a site with no media files cannot tell, and counts.
+fn media_based(config: *const Config, publr: []const u8, folder: []const u8, address: []const u8) bool {
+    const listed = project.run(config, publr, folder, &.{ "--as-admin", "media", "list", "--limit", "1" }) catch return false;
+    const marker = "\"url\":";
+    const at = std.mem.indexOf(u8, listed, marker) orelse return std.mem.indexOf(u8, listed, "\"key\"") == null;
+    const rest = std.mem.trimStart(u8, listed[at + marker.len ..], " \"");
+
+    return std.mem.startsWith(u8, rest, address);
 }
 
 /// Placeholders for the media `folder`'s site came without, written by its Publr, and their
