@@ -47,6 +47,8 @@ const usage =
     \\                             --print: the signed-in link instead (good for a minute, once)
     \\  publr logs [<name>]        the end of the site's server log
     \\  publr rm <name> [--yes]    stop it and move it to its folder's .trash
+    \\  publr rename <name> <new>  its folder renamed (a running site restarts); one on
+    \\                             Cloud is renamed on Cloud instead
     \\  publr upgrade <name>...    moved to the Publr Cloud runs, repaired when Cloud's Publr
     \\                             cannot open it (--check: only say; --yes: agree to what is
     \\                             kept aside; --all: every site)
@@ -121,6 +123,7 @@ pub const Command = enum {
     open,
     logs,
     rm,
+    rename,
     upgrade,
     desktop,
     config,
@@ -206,6 +209,7 @@ fn run(init: std.process.Init) !u8 {
         .open => try open(init, &config, out, rest, self_path),
         .logs => try logs(&config, out, rest),
         .rm => try remove(init, &config, out, rest),
+        .rename => return rename_site(&config, out, rest),
         .upgrade => return upgrade_of(&config, out, rest),
         .desktop => try desktop(init, &config, rest),
         .config => try configure(&config, out, rest),
@@ -1024,4 +1028,29 @@ test "of `cloud` only `cloud login` and `cloud deploy` are the command's own" {
     try std.testing.expect(own(&.{ "cloud", "spaces" }) == null);
     try std.testing.expect(own(&.{ "content", "list" }) == null);
     try std.testing.expectEqual(Command.ls, own(&.{"ls"}).?);
+}
+
+/// `rename <name> <new>`: the site's folder takes the new name.
+fn rename_site(config: *Config, out: *std.Io.Writer, rest: []const []const u8) !u8 {
+    if (rest.len != 2) {
+        return error.Usage;
+    }
+
+    const sites = try Sites.find(config);
+    const site = try sites.named(rest[0]);
+    const renamed = core.rename.rename(config, site, rest[1]) catch |err| {
+        const why = switch (err) {
+            error.InvalidName => "lowercase letters, numbers and single dashes, a letter first",
+            error.NameTaken => "a site or folder of that name is there already",
+            error.Linked => "it is linked to Cloud: rename it on Cloud or in Publr Desktop",
+            else => return err,
+        };
+
+        std.debug.print("publr: cannot rename {s} to {s}: {s}\n", .{ site.name, rest[1], why });
+        return 1;
+    };
+
+    try out.print("{s} is now {s} ({s})\n", .{ site.name, renamed.name, renamed.folder });
+
+    return 0;
 }

@@ -21,6 +21,7 @@ pub const changes = @import("core/changes.zig");
 pub const skill = @import("core/skill.zig");
 pub const compat = @import("core/compat.zig");
 pub const upgrade = @import("core/upgrade.zig");
+pub const rename = @import("core/rename.zig");
 
 pub const Config = config.Config;
 pub const Site = sites.Site;
