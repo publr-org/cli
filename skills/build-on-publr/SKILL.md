@@ -49,8 +49,9 @@ templates read at runtime, never compiled). It is never a modified core.
 
 Walk this ladder for every requirement. Stop at the first rung that works.
 
-1. **It already exists.** `publr --help`, `publr <namespace> --help`, `publr <namespace>
-   <verb> --help`, and the plugins installed (`publr --as-admin plugin list`; on a site
+1. **It already exists.** First `publr find "<what you want to do>"`: the commands and guide
+   entries that fit the task. Then `publr <namespace> <verb> --help` on what it found,
+   and the plugins installed (`publr --as-admin plugin list`; on a site
    elsewhere `publr plugin list`, since your device is who you are there).
    **Or Publr's marketplace has it.** Before building a feature, ask:
    `publr plugin find --request "<what your person asked, in their words>"`, then
@@ -60,6 +61,9 @@ Walk this ladder for every requirement. Stop at the first rung that works.
 2. **It is content.** A content type, a field, a settings type: declared in a plugin (a
    `publr.record.define` in its one `publr.plugin.define` registration) and
    edited in the admin. Never a table of your own.
+   Categories, tags and any shared list records are filed under are a **taxonomy**
+   (`publr taxonomy create`; in a plugin `publr.taxonomy.define`), never a text field. Read
+   the `hints` a command answers: each names an API that fits a field better.
 3. **It is a page.** A template in an app, a dynamic island for what is per visitor. A new
    frontend is a new app in the same project.
 4. **It is behaviour.** An operation in a plugin (`publr.operation.define`, its words in
